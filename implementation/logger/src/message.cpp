@@ -8,6 +8,9 @@
 #include <ctime>
 #include <iomanip>
 #include <iostream>
+#ifdef VSOMEIP_USE_SPDLOG
+#include <spdlog/spdlog.h>
+#endif
 #include <sstream>
 #include <string>
 
@@ -108,6 +111,30 @@ message::~message() try {
     }
 
     if (console_enabled_) {
+#ifdef VSOMEIP_USE_SPDLOG
+        switch (level_) {
+            case level_e::LL_FATAL:
+                spdlog::get("vsomeip")->critical(buffer_as_view());
+                break;
+            case level_e::LL_ERROR:
+                spdlog::get("vsomeip")->error(buffer_as_view());
+                break;
+            case level_e::LL_WARNING:
+                spdlog::get("vsomeip")->warn(buffer_as_view());
+                break;
+            case level_e::LL_INFO:
+                spdlog::get("vsomeip")->info(buffer_as_view());
+                break;
+            case level_e::LL_DEBUG:
+                spdlog::get("vsomeip")->debug(buffer_as_view());
+                break;
+            case level_e::LL_VERBOSE:
+                spdlog::get("vsomeip")->trace(buffer_as_view());
+                break;
+            default:
+                break;
+        };
+#else
 #ifndef ANDROID
         // std::cout is threadsafe, but output may be interleaved if multiple things are
         // streamed. To avoid a lock, build the full logline first and stream as a
@@ -165,6 +192,7 @@ message::~message() try {
             ALOGI(app.c_str(), output.c_str());
         };
 #endif // !ANDROID
+#endif // VSOMEIP_USE_SPDLOG
     }
 
     if (file_enabled_) {

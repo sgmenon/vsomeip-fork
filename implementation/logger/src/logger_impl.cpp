@@ -5,6 +5,11 @@
 
 #include <vsomeip/runtime.hpp>
 
+#ifdef VSOMEIP_USE_SPDLOG
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_sinks.h>
+#endif
+
 #include "../include/logger_impl.hpp"
 #include "../../configuration/include/configuration.hpp"
 
@@ -35,6 +40,24 @@ void logger_impl::set_configuration(const std::shared_ptr<configuration>& _confi
                 log_file_ = std::ofstream{_configuration->get_logfile()};
             }
         }
+#ifdef VSOMEIP_USE_SPDLOG
+        // Set spdlog level based on configured loglevel
+        spdlog::level::level_enum spdlog_level = spdlog::level::info;
+        switch (cfg.loglevel) {
+            case level_e::LL_FATAL:   spdlog_level = spdlog::level::critical; break;
+            case level_e::LL_ERROR:   spdlog_level = spdlog::level::err; break;
+            case level_e::LL_WARNING: spdlog_level = spdlog::level::warn; break;
+            case level_e::LL_INFO:    spdlog_level = spdlog::level::info; break;
+            case level_e::LL_DEBUG:   spdlog_level = spdlog::level::debug; break;
+            case level_e::LL_VERBOSE: spdlog_level = spdlog::level::trace; break;
+            default: break;
+        }
+        auto logger = spdlog::get("vsomeip");
+        if (!logger) {
+            logger = spdlog::stdout_logger_mt("vsomeip");
+        }
+        logger->set_level(spdlog_level);
+#endif
         config_.store(cfg, std::memory_order_release);
     }
 }
