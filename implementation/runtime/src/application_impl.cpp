@@ -12,6 +12,7 @@
 #include <boost/asio/ip/host_name.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/exception/diagnostic_information.hpp>
+#include <boost/asio/detail/posix_signal_blocker.hpp>
 
 #if defined(__linux__)
 #include <dlfcn.h>
