@@ -7,6 +7,7 @@
 #define VSOMEIP_V3_RUNTIME_IMPL_HPP_
 
 #include <vsomeip/runtime.hpp>
+#include <vsomeip/application_ext.hpp>
 #include <map>
 #include <mutex>
 
@@ -23,6 +24,9 @@ public:
 
     std::shared_ptr<application> create_application(const std::string& _name);
     std::shared_ptr<application> create_application(const std::string& _name, const std::string& _path);
+
+    std::shared_ptr<application> create_application(
+            const std::string& _name, const std::string& _path, boost::asio::io_context& _io);
 
     std::shared_ptr<message> create_message(bool _reliable) const;
     std::shared_ptr<message> create_request(bool _reliable) const;

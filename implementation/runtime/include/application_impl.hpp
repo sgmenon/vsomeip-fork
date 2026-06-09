@@ -45,11 +45,14 @@ class routing_manager_stub;
 class application_impl : public application, public routing_manager_host, public std::enable_shared_from_this<application_impl> {
 public:
     VSOMEIP_EXPORT application_impl(const std::string& _name, const std::string& _path);
+    VSOMEIP_EXPORT application_impl(const std::string& _name, const std::string& _path, boost::asio::io_context& _io);
     VSOMEIP_EXPORT ~application_impl();
 
     VSOMEIP_EXPORT bool init();
     VSOMEIP_EXPORT void start();
+    VSOMEIP_EXPORT void start_nonblocking() override;
     VSOMEIP_EXPORT void stop();
+    VSOMEIP_EXPORT void stop_nonblocking() override;
     VSOMEIP_EXPORT void process(int _number);
 
     VSOMEIP_EXPORT security_mode_e get_security_mode() const;
@@ -265,6 +268,9 @@ private:
 
     void watchdog_cbk(boost::system::error_code const& _error);
 
+    void notify_dispatch();
+    void drain_dispatched_handlers();
+
     bool is_local_endpoint(const boost::asio::ip::address& _unicast, port_t _port);
 
     const std::deque<message_handler_t>& find_handlers(service_t _service, instance_t _instance, method_t _method) const;
@@ -303,7 +309,9 @@ private:
     pthread_t start_thread_;
 #endif
 
-    boost::asio::io_context io_;
+    std::unique_ptr<boost::asio::io_context> owned_io_;
+    boost::asio::io_context& io_;
+    bool external_io_;
     std::vector<std::shared_ptr<std::thread>> io_threads_;
     std::shared_ptr<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>> work_;
 

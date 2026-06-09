@@ -130,6 +130,25 @@ public:
     virtual void stop() = 0;
 
     /**
+     * \brief Non-blocking start for external I/O context mode.
+     *
+     * Performs all startup steps (routing, plugins) without spawning
+     * I/O threads or calling io_.run(). The caller is responsible for
+     * running the io_context.
+     *
+     * Default implementation falls back to the blocking \ref start.
+     */
+    virtual void start_nonblocking() { start(); }
+
+    /**
+     * \brief Non-blocking stop for external I/O context mode.
+     *
+     * Performs shutdown steps without joining internal threads.
+     * Default implementation falls back to \ref stop.
+     */
+    virtual void stop_nonblocking() { stop(); }
+
+    /**
      * \brief Process messages / events.
      *
      * This methods controls the message / event processing from an application

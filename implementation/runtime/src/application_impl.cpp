@@ -52,7 +52,28 @@ application_impl::application_impl(const std::string& _name, const std::string& 
 #if defined(__linux__) || defined(__QNX__)
     start_thread_{0},
 #endif
+    owned_io_(std::make_unique<boost::asio::io_context>()),
+    io_(*owned_io_),
+    external_io_(false),
     work_{std::make_shared<boost::asio::executor_work_guard<boost::asio::io_context::executor_type>>(io_.get_executor())},
+    routing_{nullptr}, state_{state_type_e::ST_DEREGISTERED}, security_mode_{security_mode_e::SM_ON},
+#ifdef VSOMEIP_ENABLE_SIGNAL_HANDLING
+    signals_{io_, SIGINT, SIGTERM},
+#endif
+    is_dispatching_{false}, max_dispatchers_{VSOMEIP_DEFAULT_MAX_DISPATCHERS}, max_dispatch_time_{VSOMEIP_DEFAULT_MAX_DISPATCH_TIME},
+    dispatcher_counter_{0}, max_detached_thread_wait_time{VSOMEIP_MAX_WAIT_TIME_DETACHED_THREADS}, stopped_{false},
+    block_stop_condition_{false}, is_routing_manager_host_{false}, stopped_called_{false}, watchdog_timer_{io_},
+    client_side_logging_{false}, has_session_handling_{true} {
+}
+
+application_impl::application_impl(const std::string& _name, const std::string& _path, boost::asio::io_context& _io) :
+    runtime_{runtime::get()}, client_{VSOMEIP_CLIENT_UNSET}, session_{0}, is_initialized_{false}, name_{_name}, path_{_path},
+#if defined(__linux__) || defined(__QNX__)
+    start_thread_{0},
+#endif
+    owned_io_(),
+    io_(_io),
+    external_io_(true),
     routing_{nullptr}, state_{state_type_e::ST_DEREGISTERED}, security_mode_{security_mode_e::SM_ON},
 #ifdef VSOMEIP_ENABLE_SIGNAL_HANDLING
     signals_{io_, SIGINT, SIGTERM},
@@ -944,7 +965,7 @@ void application_impl::invoke_availability_handler(service_t _service, instance_
                         its_sync_handler->service_id_ = _service;
                         its_sync_handler->instance_id_ = _instance;
                         handlers_.push_back(its_sync_handler);
-                        dispatcher_condition_.notify_one();
+                        notify_dispatch();
                     }
                 }
             }
@@ -985,7 +1006,7 @@ void application_impl::register_availability_handler_unlocked(service_t _service
         }
     }
     // trigger dispatching
-    dispatcher_condition_.notify_one();
+    notify_dispatch();
 }
 
 void application_impl::unregister_availability_handler(service_t _service, instance_t _instance, major_version_t _major,
@@ -1304,7 +1325,7 @@ void application_impl::deliver_subscription_state(service_t _service, instance_t
             handlers_.push_back(its_sync_handler);
         }
         if (handlers.size()) {
-            dispatcher_condition_.notify_one();
+            notify_dispatch();
         }
     }
 }
@@ -1518,7 +1539,7 @@ void application_impl::on_state(state_type_e _state) {
         auto its_sync_handler = std::make_shared<sync_handler>([handler, _state]() { handler(_state); });
         its_sync_handler->handler_type_ = handler_type_e::STATE;
         handlers_.push_back(its_sync_handler);
-        dispatcher_condition_.notify_one();
+        notify_dispatch();
     }
 }
 
@@ -1678,7 +1699,7 @@ void application_impl::on_availability(service_t _service, instance_t _instance,
 
     if (its_handlers.size()) {
         std::scoped_lock handlers_lock{handlers_mutex_};
-        dispatcher_condition_.notify_one();
+        notify_dispatch();
     }
 }
 
@@ -1732,7 +1753,7 @@ void application_impl::on_message(std::shared_ptr<message>&& _message) {
                 its_sync_handler->session_id_ = _message->get_session();
                 handlers_.push_back(its_sync_handler);
             }
-            dispatcher_condition_.notify_one();
+            notify_dispatch();
         }
     }
 }
@@ -2522,7 +2543,7 @@ void application_impl::on_offered_services_info(std::vector<std::pair<service_t,
         auto its_sync_handler = std::make_shared<sync_handler>([handler, _services]() { handler(_services); });
         its_sync_handler->handler_type_ = handler_type_e::OFFERED_SERVICES_INFO;
         handlers_.push_back(its_sync_handler);
-        dispatcher_condition_.notify_one();
+        notify_dispatch();
     }
 }
 
@@ -2544,7 +2565,7 @@ void application_impl::watchdog_cbk(boost::system::error_code const& _error) {
             auto its_sync_handler = std::make_shared<sync_handler>([handler]() { handler(); });
             its_sync_handler->handler_type_ = handler_type_e::WATCHDOG;
             handlers_.push_back(its_sync_handler);
-            dispatcher_condition_.notify_one();
+            notify_dispatch();
         }
     }
 }
@@ -2911,6 +2932,98 @@ void application_impl::decrement_active_threads() {
 
 std::uint16_t application_impl::get_active_threads() const {
     return dispatcher_counter_;
+}
+
+void application_impl::start_nonblocking() {
+    {
+        std::scoped_lock its_lock{start_stop_mutex_};
+        stopped_ = false;
+        stopped_called_ = false;
+        start_caller_id_ = std::this_thread::get_id();
+    }
+    {
+        std::scoped_lock its_lock_inner{dispatcher_mutex_};
+        is_dispatching_ = true;
+    }
+
+    if (routing_)
+        routing_->start();
+
+    auto its_plugins = configuration_->get_plugins(name_);
+    auto its_app_plugin_info = its_plugins.find(plugin_type_e::APPLICATION_PLUGIN);
+    if (its_app_plugin_info != its_plugins.end()) {
+        for (const auto& its_library : its_app_plugin_info->second) {
+            auto its_application_plugin = plugin_manager::get()->get_plugin(
+                    plugin_type_e::APPLICATION_PLUGIN, its_library);
+            if (its_application_plugin) {
+                std::dynamic_pointer_cast<application_plugin>(its_application_plugin)
+                        ->on_application_state_change(name_, application_plugin_state_e::STATE_STARTED);
+            }
+        }
+    }
+
+    VSOMEIP_INFO << "Started vsomeip application \"" << name_ << "\" ("
+                 << std::hex << std::setfill('0') << std::setw(4) << client_
+                 << ") with external I/O context";
+}
+
+void application_impl::stop_nonblocking() {
+    {
+        std::scoped_lock its_lock{start_stop_mutex_};
+        stopped_ = true;
+        stopped_called_ = true;
+    }
+    {
+        std::scoped_lock its_lock{dispatcher_mutex_};
+        is_dispatching_ = false;
+    }
+
+    if (configuration_) {
+        auto its_plugins = configuration_->get_plugins(name_);
+        auto its_app_plugin_info = its_plugins.find(plugin_type_e::APPLICATION_PLUGIN);
+        if (its_app_plugin_info != its_plugins.end()) {
+            for (const auto& its_library : its_app_plugin_info->second) {
+                auto its_application_plugin = plugin_manager::get()->get_plugin(
+                        plugin_type_e::APPLICATION_PLUGIN, its_library);
+                if (its_application_plugin) {
+                    std::dynamic_pointer_cast<application_plugin>(its_application_plugin)
+                            ->on_application_state_change(name_, application_plugin_state_e::STATE_STOPPED);
+                }
+            }
+        }
+    }
+
+    if (routing_)
+        routing_->stop();
+}
+
+void application_impl::notify_dispatch() {
+    if (external_io_) {
+        boost::asio::post(io_, [self = shared_from_this()]() {
+            self->drain_dispatched_handlers();
+        });
+    } else {
+        dispatcher_condition_.notify_one();
+    }
+}
+
+void application_impl::drain_dispatched_handlers() {
+    if (!is_dispatching_)
+        return;
+
+    std::unique_lock<std::mutex> its_lock(handlers_mutex_);
+    while (is_dispatching_) {
+        auto its_handler = get_next_handler();
+        if (!its_handler)
+            break;
+
+        its_lock.unlock();
+        if (its_handler->handler_) {
+            its_handler->handler_();
+        }
+        its_lock.lock();
+        reschedule_availability_handler(its_handler);
+    }
 }
 
 } // namespace vsomeip_v3

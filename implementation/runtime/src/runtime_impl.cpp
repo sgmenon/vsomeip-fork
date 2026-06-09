@@ -5,6 +5,8 @@
 
 #include <vsomeip/defines.hpp>
 
+#include <boost/asio/io_context.hpp>
+
 #include "../include/application_impl.hpp"
 #include "../include/runtime_impl.hpp"
 #include "../../message/include/message_impl.hpp"
@@ -46,6 +48,25 @@ std::shared_ptr<application> runtime_impl::create_application(const std::string&
     std::shared_ptr<application> application = std::make_shared<application_impl>(its_name, _path);
     applications_[its_name] = application;
     return application;
+}
+
+std::shared_ptr<application> runtime_impl::create_application(
+        const std::string& _name, const std::string& _path, boost::asio::io_context& _io) {
+    std::scoped_lock its_lock{applications_mutex_};
+    static std::uint32_t postfix_id = 0;
+    std::string its_name = _name;
+    auto found_application = applications_.find(_name);
+    if (found_application != applications_.end()) {
+        its_name += "_" + std::to_string(postfix_id++);
+    }
+    std::shared_ptr<application> application = std::make_shared<application_impl>(its_name, _path, _io);
+    applications_[its_name] = application;
+    return application;
+}
+
+std::shared_ptr<application> create_application_with_external_io(
+        const std::string& _name, boost::asio::io_context& _io) {
+    return std::dynamic_pointer_cast<runtime_impl>(runtime::get())->create_application(_name, "", _io);
 }
 
 std::shared_ptr<message> runtime_impl::create_message(bool _reliable) const {
