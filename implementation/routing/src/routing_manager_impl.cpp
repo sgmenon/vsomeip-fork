@@ -154,7 +154,13 @@ void routing_manager_impl::init() {
 
     if (configuration_->is_sd_enabled()) {
         VSOMEIP_INFO << "Service Discovery enabled. Trying to load module.";
-        auto its_plugin = plugin_manager::get()->get_plugin(plugin_type_e::SD_RUNTIME_PLUGIN, VSOMEIP_SD_LIBRARY);
+
+        const char *its_sd_module = getenv(VSOMEIP_ENV_SD_MODULE);
+        std::string plugin_name = its_sd_module != nullptr ? its_sd_module : VSOMEIP_SD_LIBRARY;
+        auto its_plugin = plugin_manager::get()->get_plugin(plugin_type_e::SD_RUNTIME_PLUGIN, plugin_name);
+
+        VSOMEIP_INFO << "Loading SD module " << plugin_name;
+
         if (its_plugin) {
             VSOMEIP_INFO << "Service Discovery module loaded.";
             discovery_ = std::dynamic_pointer_cast<sd::runtime>(its_plugin)->create_service_discovery(this, configuration_);
@@ -826,7 +832,13 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                 e2e_buffer its_buffer;
 
                 if (e2e_provider_) {
-                    if (!is_service_discovery) {
+                // GM - Begin
+                    //if ( !is_service_discovery) {
+                    if ( is_service_discovery) {
+                        VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting SD message ..";
+                    } else {
+                        VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting non-SD message ..";
+                    }
                         service_t its_service_inner = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
                         method_t its_method_inner = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
 #ifndef ANDROID
@@ -845,7 +857,8 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                             _data = its_buffer.data();
                         }
 #endif
-                    }
+                    //}
+                // GM - End
                 }
                 if (is_request) {
                     its_target = ep_mgr_impl_->find_or_create_remote_client(its_service, _instance, _reliable);
@@ -1034,10 +1047,37 @@ bool routing_manager_impl::send_to(const std::shared_ptr<endpoint_definition>& _
     return is_sent;
 }
 
-bool routing_manager_impl::send_via_sd(const std::shared_ptr<endpoint_definition>& _target, const byte_t* _data, uint32_t _size,
-                                       uint16_t _sd_port) {
+bool routing_manager_impl::send_via_sd(
+        const std::shared_ptr<endpoint_definition> &_target,
+        const byte_t *_data, uint32_t _size, uint16_t _sd_port) {
+    // GM - Begin
+    instance_t its_instance(0x0);
+    e2e_buffer its_buffer;
+
+    if (e2e_provider_) {
+        VSOMEIP_DEBUG << "routing_manager_impl::send_via_sd() >>>> e2e_provider enabled, protecting SD message ..";
+        service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
+        method_t its_method   = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
+#ifndef ANDROID
+        // Find out where the protected area starts
+        size_t its_base = e2e_provider_->get_protection_base({its_service, its_method});
+
+        // Build a corresponding buffer
+        its_buffer.assign(_data + its_base, _data + _size);
+
+        e2e_provider_->protect({ its_service, its_method }, its_buffer, its_instance);
+
+        // Prepend header
+        its_buffer.insert(its_buffer.begin(), _data, _data + its_base);
+
+        _data = its_buffer.data();
+#endif
+    }
+    // GM - End
     bool is_sent{false};
-    std::shared_ptr<endpoint> its_endpoint = ep_mgr_impl_->find_server_endpoint(_sd_port, _target->is_reliable());
+    std::shared_ptr<endpoint> its_endpoint =
+            ep_mgr_impl_->find_server_endpoint(_sd_port,
+                    _target->is_reliable());
 
     if (its_endpoint) {
         is_sent = its_endpoint->send_to(_target, _data, _size);
@@ -1294,6 +1334,24 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
     if (its_service == VSOMEIP_SD_SERVICE) {
         if (discovery_ && its_method == sd::method) {
             if (configuration_->get_sd_port() == _remote_port) {
+                // GM - Begin
+                if (e2e_provider_) {
+                        VSOMEIP_DEBUG << "routing_manager_impl::on_message() <<<< e2e_provider enabled, checking SD message ..";
+#ifndef ANDROID
+                                if (e2e_provider_->is_checked({its_service, its_method})) {
+                                    auto its_base = e2e_provider_->get_protection_base({its_service, its_method});
+                                    e2e_buffer its_buffer(_data + its_base, _data + _size);
+                                    e2e_provider_->check({its_service, its_method},
+                                            its_buffer, its_instance, its_check_status);
+    
+                                    if (its_check_status != e2e::profile_interface::generic_check_status::E2E_OK) {
+                                        VSOMEIP_INFO << "E2E protection: CRC check failed for service: "
+                                                << std::hex << its_service << " method: " << its_method;
+                                    }
+                                }
+#endif
+                            }
+                // GM - End
                 // ACL check SD message
                 if (!is_acl_message_allowed(_receiver, its_service, ANY_INSTANCE, _remote_address)) {
                     return;

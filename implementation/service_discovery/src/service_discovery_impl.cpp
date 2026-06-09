@@ -70,8 +70,12 @@ boost::asio::io_context& service_discovery_impl::get_io() {
 }
 
 void service_discovery_impl::init() {
-    runtime_ =
-            std::dynamic_pointer_cast<sd::runtime>(plugin_manager::get()->get_plugin(plugin_type_e::SD_RUNTIME_PLUGIN, VSOMEIP_SD_LIBRARY));
+    const char *its_sd_module = getenv(VSOMEIP_ENV_SD_MODULE);
+    std::string plugin_name = its_sd_module != nullptr ? its_sd_module : VSOMEIP_SD_LIBRARY;
+
+    VSOMEIP_INFO << "Get SD plugin " << plugin_name;
+    runtime_ = std::dynamic_pointer_cast<sd::runtime>(
+            plugin_manager::get()->get_plugin(plugin_type_e::SD_RUNTIME_PLUGIN, plugin_name));
 
     unicast_ = configuration_->get_unicast_address();
     sd_multicast_ = configuration_->get_sd_multicast();

@@ -289,7 +289,7 @@ private:
      */
     void check_stopped_services_on_suspend(const boost::system::error_code& error);
 
-private:
+    private:
     boost::asio::io_context& io_;
     service_discovery_host* host_;
     std::shared_ptr<configuration> configuration_;
