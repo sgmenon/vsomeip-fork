@@ -68,6 +68,7 @@ private:
 
 #define VSOMEIP_PLUGIN(class_name) \
     extern "C" { \
+        VSOMEIP_EXPORT vsomeip_v3::create_plugin_func vsomeip_plugin_init(); \
         VSOMEIP_EXPORT vsomeip_v3::create_plugin_func vsomeip_plugin_init() { \
             return class_name::get_plugin; \
         } \
