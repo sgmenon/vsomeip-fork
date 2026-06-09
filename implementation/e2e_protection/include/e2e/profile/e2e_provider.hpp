@@ -19,6 +19,7 @@ namespace e2e {
 
 class e2e_provider {
 public:
+    virtual ~e2e_provider() {}
     virtual bool add_configuration(std::shared_ptr<cfg::e2e> config) = 0;
 
     virtual bool is_protected(e2exf::data_identifier_t id) const = 0;
