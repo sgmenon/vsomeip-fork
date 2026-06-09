@@ -1,0 +1,30 @@
+# Copyright 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# vsomeip - SOME/IP implementation
+# Source: https://github.com/COVESA/vsomeip (GM fork)
+
+module(
+    name = "vsomeip",
+    version = "3.6.1.gm.4",
+    compatibility_level = 1,
+)
+
+bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+bazel_dep(name = "boost.asio", version = "1.87.0")
+bazel_dep(name = "boost.date_time", version = "1.87.0")
+bazel_dep(name = "boost.filesystem", version = "1.87.0")
+bazel_dep(name = "boost.foreach", version = "1.87.0")
+bazel_dep(name = "boost.functional", version = "1.87.0")
+bazel_dep(name = "boost.interprocess", version = "1.87.0")
+bazel_dep(name = "boost.process", version = "1.87.0")
+bazel_dep(name = "boost.system", version = "1.87.0")
+bazel_dep(name = "boost.property_tree", version = "1.87.0")
+bazel_dep(name = "boost.program_options", version = "1.87.0")
+bazel_dep(name = "boost.stacktrace", version = "1.87.0")
+bazel_dep(name = "boost.icl", version = "1.87.0")
+bazel_dep(name = "spdlog", version = "1.10.0")
+
+
+
