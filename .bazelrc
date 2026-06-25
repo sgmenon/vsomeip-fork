@@ -1,6 +1,7 @@
 common  --host_platform=@bazel-toolchains//platforms:x86_64_linux_gcc11
 common --platforms=@bazel-toolchains//platforms:x86_64_linux_gcc11
 common --extra_toolchains=@gcc_toolchain_x86_64-gcc11//:cc_toolchain
+common --compilation_mode=opt
 
 build:opt --compilation_mode=opt
 
