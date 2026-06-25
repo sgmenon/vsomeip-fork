@@ -1,0 +1,16 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "endpoint_tests",
+    srcs = glob(["*.cpp", "*.hpp"]),
+    copts = ["-std=c++20"],
+    deps = [
+        "//:vsomeip-lib",
+        "//test/unit_tests:test_main",
+        "@boost.asio",
+        "@boost.system",
+        "@googletest//:gtest",
+    ],
+)

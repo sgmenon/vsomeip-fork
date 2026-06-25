@@ -1,0 +1,40 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# Shared utility library used by vsomeip unit and network tests.
+# CMake equivalent: test/common/CMakeLists.txt -> project(vsomeip_utilities)
+
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//test:__subpackages__"])
+
+# Example policy JSON files consumed at runtime by security tests via
+# common::utility::get_policies_path(), which reads from
+# "<cwd>/test/common/examples_policies". cc_test runfiles preserve the source
+# path layout, so listing these as data is sufficient.
+filegroup(
+    name = "examples_policies",
+    testonly = True,
+    srcs = glob(["examples_policies/**"]),
+)
+
+cc_library(
+    name = "vsomeip_utilities",
+    testonly = True,
+    srcs = glob([
+        "src/*.cpp",
+        "src/external/*.cpp",
+    ]),
+    hdrs = glob([
+        "include/common/*.hpp",
+        "include/common/external/*.hpp",
+    ]),
+    copts = ["-std=c++20"],
+    strip_include_prefix = "include",
+    deps = [
+        "//:vsomeip-lib",
+        "@boost.asio",
+        "@boost.filesystem",
+        "@boost.property_tree",
+        "@boost.system",
+    ],
+)

@@ -1,0 +1,18 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# Shared `int main(...)` for unit tests that just want the default
+# gtest runner (mirrors the CMake pattern of compiling ../main.cpp
+# into each test executable).
+
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//test:__subpackages__"])
+
+cc_library(
+    name = "test_main",
+    testonly = True,
+    srcs = ["main.cpp"],
+    copts = ["-std=c++20"],
+    deps = ["@googletest//:gtest"],
+    alwayslink = True,
+)

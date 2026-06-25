@@ -1,0 +1,40 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# security_policy_manager_impl_tests needs a generated macro header
+# (policy_manager_impl_unit_test_macro.hpp) that bakes in a directory path
+# the test then uses to create per-uid/gid sub-directories at runtime.
+# The parent directory must exist for boost::filesystem::create_directory
+# to succeed, so we point UNIT_TEST_BUILD_DIR_PATH at this package's path
+# under the runfiles tree (which always exists because the BUILD file lives
+# there) and we add the .hpp.in itself as data to guarantee the directory
+# is materialized in runfiles even when no other files in this package are
+# referenced as data.
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+genrule(
+    name = "policy_manager_impl_unit_test_macro_hpp",
+    srcs = ["policy_manager_impl_unit_test_macro.hpp.in"],
+    outs = ["policy_manager_impl_unit_test_macro.hpp"],
+    cmd = "sed 's|@UNIT_TEST_BIN_DIR@|test/unit_tests|g' $< > $@",
+)
+
+cc_test(
+    name = "security_policy_manager_impl_tests",
+    srcs = glob(["*.cpp"]) + [":policy_manager_impl_unit_test_macro_hpp"],
+    copts = ["-std=c++20"],
+    # The generated macro header lives in the bin tree; add this package's
+    # bin dir to the include path so it can be #included by name.
+    includes = ["."],
+    # Ensure test/unit_tests/security_policy_manager_impl_tests/ exists in the
+    # cc_test runfiles tree (cwd is the workspace root); the test creates
+    # sub-directories under this path at runtime.
+    data = ["policy_manager_impl_unit_test_macro.hpp.in"],
+    deps = [
+        "//:vsomeip-cfg",
+        "//:vsomeip-lib",
+        "//test/common:vsomeip_utilities",
+        "//test/unit_tests:test_main",
+        "@googletest//:gtest",
+    ],
+)
