@@ -148,7 +148,7 @@ cc_library(
     name = "vsomeip-internal-hdrs",
     hdrs = VSOMEIP_INTERNAL_HDRS,
     defines = VSOMEIP_DEFINES,
-    includes = ["."],
+    strip_include_prefix = "/", 
     visibility = ["//visibility:public"],
     deps = [":vsomeip_hdrs"],
 )
@@ -177,12 +177,16 @@ cc_library(
             "implementation/utility/src/wrappers.cpp",
             "implementation/utility/src/wrappers_qnx.cpp",
         ],
-    ) + VSOMEIP_INTERNAL_HDRS + select({
+    ) + select({
         ":is_multiple_routing_managers_enabled": [
             "implementation/configuration/src/configuration_impl.cpp",
         ],
         "//conditions:default": [],
     }),
+    # Internal implementation headers are exposed via hdrs so downstream
+    # consumers (notably the unit tests under //test/...) can include them
+    # directly without re-declaring source dependencies.
+    hdrs = VSOMEIP_INTERNAL_HDRS,
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES + select({
         ":is_multiple_routing_managers_enabled": [
@@ -192,8 +196,8 @@ cc_library(
     }),
     includes = ["interface"],
     linkopts = VSOMEIP_LINKOPTS,
-    deps = VSOMEIP_DEPS,
-    visibility = ["//visibility:private"],
+    deps = VSOMEIP_DEPS + [":vsomeip-internal-hdrs"],
+    visibility = ["//visibility:public"],
 )
 
 cc_shared_library(
@@ -221,6 +225,8 @@ cc_library(
         [
             "implementation/configuration/src/*.cpp",
             "implementation/configuration/include/*.hpp",
+            "implementation/utility/include/service_instance_map.hpp",
+            "implementation/tracing/include/enumeration_types.hpp",
         ],
     ) + [
         "implementation/e2e_protection/include/e2exf/config.hpp",
@@ -228,16 +234,17 @@ cc_library(
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    # Only depend on vsomeip - boost deps come through dynamic link to vsomeip3
-    deps = [":vsomeip"],
-    target_compatible_with = select({
-        ":is_multiple_routing_managers_enabled": [":incompatible"],
-        "//conditions:default": [],
-    }),
+    # Depend on the cc_library form of vsomeip so consumers (notably the unit
+    # tests) can statically link a single, consistent copy of vsomeip's TUs.
+    # The shared-library form (vsomeip3.so) is wired up below via
+    # cc_shared_library.dynamic_deps so the production .so still links
+    # dynamically against libvsomeip3.so rather than re-bundling its objects.
+    deps = [":vsomeip-lib"],
 )
 
 cc_shared_library(
     name = "vsomeip3-cfg-unversioned",
+    dynamic_deps = [":vsomeip3"],
     deps = [":vsomeip-cfg"],
 )
 
@@ -263,12 +270,13 @@ cc_library(
     defines = VSOMEIP_DEFINES,
     include_prefix = "vsomeip",
     linkopts = VSOMEIP_LINKOPTS,
-    # Only depend on vsomeip - boost deps come through dynamic link to vsomeip3
-    deps = [":vsomeip"],
+    # See note on vsomeip-cfg deps.
+    deps = [":vsomeip-lib"],
 )
 
 cc_shared_library(
     name = "vsomeip3-sd-unversioned",
+    dynamic_deps = [":vsomeip3"],
     deps = [":vsomeip-sd"],
 )
 
@@ -292,12 +300,13 @@ cc_library(
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    # Only depend on vsomeip - boost deps come through dynamic link to vsomeip3
-    deps = [":vsomeip"],
+    # See note on vsomeip-cfg deps.
+    deps = [":vsomeip-lib"],
 )
 
 cc_shared_library(
     name = "vsomeip3-e2e-unversioned",
+    dynamic_deps = [":vsomeip3"],
     deps = [":vsomeip-e2e"],
 )
 

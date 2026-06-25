@@ -5,14 +5,14 @@
 
 module(
     name = "vsomeip",
-    version = "3.6.1.gm.4",
+    version = "3.6.1.sgm.1",
     compatibility_level = 1,
 )
 
-bazel_dep(name = "rules_cc", version = "0.1.1")
+bazel_dep(name = "rules_cc", version = "0.2.14")
 bazel_dep(name = "platforms", version = "1.0.0")
-bazel_dep(name = "bazel_skylib", version = "1.7.1")
-bazel_dep(name = "boost.asio", version = "1.87.0")
+bazel_dep(name = "bazel_skylib", version = "1.8.2")
+bazel_dep(name = "boost.asio", version = "1.87.0.bcr.1")
 bazel_dep(name = "boost.date_time", version = "1.87.0")
 bazel_dep(name = "boost.filesystem", version = "1.87.0")
 bazel_dep(name = "boost.foreach", version = "1.87.0")
@@ -24,7 +24,57 @@ bazel_dep(name = "boost.property_tree", version = "1.87.0")
 bazel_dep(name = "boost.program_options", version = "1.87.0")
 bazel_dep(name = "boost.stacktrace", version = "1.87.0")
 bazel_dep(name = "boost.icl", version = "1.87.0")
-bazel_dep(name = "spdlog", version = "1.10.0")
+bazel_dep(name = "spdlog", version = "1.15.3")
 
+# Declared so they can be named in the `:vsomeip3-core` cc_shared_library
+# `exports_filter` below. Both are pulled in transitively by boost.asio
+# (asio_openssl -> openssl; boost.container) and are statically linked
+# into libvsomeip3-core.so; the export bookkeeping requires they be
+# nameable. Versions resolve from BCR for a standalone build; a consuming
+# module that pins them (e.g. via single_version_override) wins.
+bazel_dep(name = "boost.chrono", version = "1.87.0")
+bazel_dep(name = "boost.context", version = "1.87.0")
+bazel_dep(name = "boost.coroutine", version = "1.87.0")
+bazel_dep(name = "boost.serialization", version = "1.87.0")
+bazel_dep(name = "boost.thread", version = "1.87.0")
+bazel_dep(name = "boost.container", version = "1.87.0")
+bazel_dep(name = "openssl", version = "3.3.1.bcr.1")
+bazel_dep(name = "fmt", version = "11.1.4")
 
+bazel_dep(name = "bazel-toolchains", version = "1.0.0", dev_dependency = True)
+bazel_dep(name = "aspect_bazel_lib", version = "2.22.5", dev_dependency = True)
+bazel_dep(name = "googletest", version = "1.16.0", dev_dependency = True)
 
+archive_override(
+    module_name = "bazel-toolchains",
+    sha256 = "d24974390cca9f9de91b28ec98baae02d87785f9a36fa66035320f61378b6c38",
+    strip_prefix = "bazel-toolchains-1.0.0",
+    url = "https://github.com/sgmenon/bazel-toolchains/archive/refs/tags/v1.0.0.tar.gz",
+)
+
+gcc_toolchain_extension = use_extension("@bazel-toolchains//gcc_toolchain:toolchain_extension.bzl", "gcc_toolchain_extension", dev_dependency = True)
+
+[
+    [
+        [
+            gcc_toolchain_extension.load_toolchain(
+                arch = arch,
+                gcc_version = gcc_version,
+            ),
+            use_repo(
+                gcc_toolchain_extension,
+                "gcc_toolchain_{arch}-{gcc_version}".format(
+                    arch = arch,
+                    gcc_version = gcc_version,
+                ),
+            ),
+        ]
+        for arch in [
+            "x86_64",
+            "aarch64",
+        ]
+    ]
+    for gcc_version in [
+        "gcc11",
+    ]
+]
