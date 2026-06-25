@@ -1,0 +1,55 @@
+name: Bazel Validation
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-intel:
+    name: Build Intel
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bazel build Intel
+        uses: ./.github/actions/bazel
+        with:
+          command: bazel build //...
+
+  build-aarch64:
+    name: Build aarch64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bazel build Aarch64
+        uses: ./.github/actions/bazel
+        with:
+          command: bazel build --config=aarch64 //...
+
+  intel-unit-tests:
+    name: Unit tests (${{ matrix.sanitizer }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [opt, asan, lsan, tsan, ubsan]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bazel test --config=${{ matrix.sanitizer }}
+        uses: ./.github/actions/bazel
+        with:
+          command: bazel test --config=${{ matrix.sanitizer }} //...
+
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: testlogs-${{ matrix.sanitizer }}
+          path: ~/.cache/bazel/**/testlogs/**/test.log
+          if-no-files-found: ignore

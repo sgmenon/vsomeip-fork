@@ -1,0 +1,24 @@
+name: Bazel
+description: Install Bazelisk and run a Bazel command. The workflow must run actions/checkout before this local action (GitHub loads action.yml from the repo checkout).
+
+inputs:
+  command:
+    description: Shell command to run (e.g. bazel build //...)
+    required: true
+  working-directory:
+    description: Working directory for the command
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Bazelisk
+      uses: bazelbuild/setup-bazelisk@6ecf4fd8b7d1f9721785f1dd656a689acf9add47 # v3
+
+    - name: Run Bazel command
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        ${{ inputs.command }}

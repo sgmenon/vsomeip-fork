@@ -2,6 +2,8 @@ common  --host_platform=@bazel-toolchains//platforms:x86_64_linux_gcc11
 common --platforms=@bazel-toolchains//platforms:x86_64_linux_gcc11
 common --extra_toolchains=@gcc_toolchain_x86_64-gcc11//:cc_toolchain
 
+build:opt --compilation_mode=opt
+
 build:aarch64 --platforms=@bazel-toolchains//platforms:aarch64_linux_gcc11
 build:aarch64 --extra_toolchains=@gcc_toolchain_aarch64-gcc11//:cc_toolchain
 
@@ -35,4 +37,5 @@ build:ubsan --strip never
 build:ubsan --action_env UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
 build:ubsan --platform_suffix=ubsan
 
+coverage --compilation_mode=fastbuild
 coverage --combined_report=lcov
