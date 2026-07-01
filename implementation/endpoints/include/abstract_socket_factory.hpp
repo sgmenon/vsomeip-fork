@@ -6,7 +6,6 @@
 #ifndef VSOMEIP_V3_ABSTRACT_SOCKET_FACTORY_HPP_
 #define VSOMEIP_V3_ABSTRACT_SOCKET_FACTORY_HPP_
 
-#include "abstract_netlink_connector.hpp"
 #include "abstract_timer.hpp"
 #include "tcp_socket.hpp"
 
@@ -23,14 +22,6 @@ public:
     virtual ~abstract_socket_factory() = default;
 
     static abstract_socket_factory* get();
-
-#if defined(__linux__)
-    // netlink needs to be faked in order to test local-tcp connection handling
-    virtual std::shared_ptr<abstract_netlink_connector> create_netlink_connector(boost::asio::io_context& _io,
-                                                                                 const boost::asio::ip::address& _address,
-                                                                                 const boost::asio::ip::address& _multicast_address,
-                                                                                 bool _is_requiring_link = true) = 0;
-#endif
 
     // only tcp sockets are fakable atm.
     virtual std::unique_ptr<tcp_socket> create_tcp_socket(boost::asio::io_context& _io) = 0;

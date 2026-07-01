@@ -22,14 +22,13 @@ genrule(
 cc_test(
     name = "security_policy_manager_impl_tests",
     srcs = glob(["*.cpp"]) + [":policy_manager_impl_unit_test_macro_hpp"],
-    copts = ["-std=c++20"],
-    # The generated macro header lives in the bin tree; add this package's
-    # bin dir to the include path so it can be #included by name.
-    includes = ["."],
     # Ensure test/unit_tests/security_policy_manager_impl_tests/ exists in the
     # cc_test runfiles tree (cwd is the workspace root); the test creates
     # sub-directories under this path at runtime.
     data = ["policy_manager_impl_unit_test_macro.hpp.in"],
+    # The generated macro header lives in the bin tree; add this package's
+    # bin dir to the include path so it can be #included by name.
+    includes = ["."],
     deps = [
         "//:vsomeip-cfg",
         "//:vsomeip-lib",

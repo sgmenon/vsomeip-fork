@@ -1,4 +1,5 @@
 load("@bazel_skylib//rules:common_settings.bzl", "bool_flag", "string_flag")
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:cc_shared_library.bzl", "cc_shared_library")
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
@@ -84,8 +85,7 @@ VSOMEIP_LINKOPTS = select({
     "//conditions:default": [],
 })
 
-VSOMEIP_DEPS = [
-    ":vsomeip_hdrs",
+THIRD_PARTY_DEPS = [
     "@boost.asio",
     "@boost.date_time",
     "@boost.filesystem",
@@ -100,8 +100,40 @@ VSOMEIP_DEPS = [
     "@spdlog",
 ]
 
+VSOMEIP_DEPS = [
+    ":vsomeip_hdrs",
+] + THIRD_PARTY_DEPS
+
 # =============================================================================
 # Source file collections
+#
+# The source tree is partitioned into two tiers:
+#
+#   1. **vsomeip-core** — everything a non-routing process needs to talk
+#      SOME/IP on the wire: network endpoints (TCP/UDP), serializer,
+#      message classes, logger, plugin manager, protocol commands,
+#      security primitives, tracing, utility, the runtime *factory*
+#      (without `application_impl`), and the routing-data classes
+#      (`event`, `eventgroupinfo`, `serviceinfo`, `remote_subscription`)
+#      that the SD layer hands around as `shared_ptr<>`.
+#      `configuration_impl.cpp` is folded in when
+#      `--//:multiple_routing_managers_enabled=True` (the default), à la
+#      upstream CMake's `VSOMEIP_ENABLE_MULTIPLE_ROUTING_MANAGERS=1`.
+#
+#   2. **vsomeip-routing-layer** — sources that exist only when this
+#      process is acting as a full vsomeip application or routing
+#      manager: the four `routing_manager_*` translation units,
+#      `application_impl`, the UDS / local-TCP IPC endpoints, the
+#      netlink connector, peer-credential check, and the endpoint
+#      manager (base + impl) that wires them all together.
+#
+# `:vsomeip-lib` is the union of the two tiers and is wrapped by the
+# regular `libvsomeip3.so` (`:vsomeip3` cc_shared_library), preserving
+# the open-source shape for downstream consumers and the test suite.
+#
+# Source lists are explicit (no `*.cpp` globs) so that the partition is
+# trivially auditable and a new file appearing under
+# `implementation/` does not silently land in `libvsomeip3-core.so`.
 # =============================================================================
 
 # Public interface headers
@@ -111,7 +143,9 @@ VSOMEIP_PUBLIC_HDRS = glob([
     "interface/vsomeip/**/*.hpp",
 ])
 
-# Internal headers (included as srcs since they use relative paths)
+# Internal headers (included as srcs since they use relative paths).
+# These are still globbed because headers are not on the symbol/link
+# critical path — adding a new header to an existing subtree is benign.
 VSOMEIP_INTERNAL_HDRS = glob(
     [
         "implementation/configuration/include/*.hpp",
@@ -133,6 +167,201 @@ VSOMEIP_INTERNAL_HDRS = glob(
     ],
 )
 
+# -----------------------------------------------------------------------------
+# Core sources — go into libvsomeip3-core.so
+# -----------------------------------------------------------------------------
+
+# Network-facing endpoints (TCP/UDP + TP fragmentation + base classes).
+# Excludes local/UDS IPC endpoints, netlink, credentials, and the endpoint
+# manager (those live in the routing layer because they only matter inside
+# a routing-manager process).
+VSOMEIP_CORE_ENDPOINTS_SRCS = [
+    "implementation/endpoints/src/abstract_socket_factory.cpp",
+    "implementation/endpoints/src/asio_socket_factory.cpp",
+    "implementation/endpoints/src/client_endpoint_impl.cpp",
+    "implementation/endpoints/src/endpoint_definition.cpp",
+    "implementation/endpoints/src/endpoint_impl.cpp",
+    "implementation/endpoints/src/server_endpoint_impl.cpp",
+    "implementation/endpoints/src/tcp_client_endpoint_impl.cpp",
+    "implementation/endpoints/src/tcp_server_endpoint_impl.cpp",
+    "implementation/endpoints/src/tp.cpp",
+    "implementation/endpoints/src/tp_message.cpp",
+    "implementation/endpoints/src/tp_reassembler.cpp",
+    "implementation/endpoints/src/udp_client_endpoint_impl.cpp",
+    "implementation/endpoints/src/udp_server_endpoint_impl.cpp",
+    "implementation/endpoints/src/virtual_server_endpoint_impl.cpp",
+]
+
+VSOMEIP_CORE_LOGGER_SRCS = [
+    "implementation/logger/src/logger_impl.cpp",
+    "implementation/logger/src/message.cpp",
+]
+
+VSOMEIP_CORE_MESSAGE_SRCS = [
+    "implementation/message/src/deserializer.cpp",
+    "implementation/message/src/message_base_impl.cpp",
+    "implementation/message/src/message_header_impl.cpp",
+    "implementation/message/src/payload_impl.cpp",
+    "implementation/message/src/serializer.cpp",
+]
+
+VSOMEIP_CORE_PLUGIN_SRCS = [
+    "implementation/plugin/src/plugin_manager.cpp",
+    "implementation/plugin/src/plugin_manager_impl.cpp",
+]
+
+VSOMEIP_CORE_PROTOCOL_SRCS = [
+    "implementation/protocol/src/assign_client_ack_command.cpp",
+    "implementation/protocol/src/assign_client_command.cpp",
+    "implementation/protocol/src/command.cpp",
+    "implementation/protocol/src/config_command.cpp",
+    "implementation/protocol/src/deregister_application_command.cpp",
+    "implementation/protocol/src/distribute_security_policies_command.cpp",
+    "implementation/protocol/src/dummy_command.cpp",
+    "implementation/protocol/src/expire_command.cpp",
+    "implementation/protocol/src/multiple_services_command_base.cpp",
+    "implementation/protocol/src/offer_service_command.cpp",
+    "implementation/protocol/src/offered_services_request_command.cpp",
+    "implementation/protocol/src/offered_services_response_command.cpp",
+    "implementation/protocol/src/ping_command.cpp",
+    "implementation/protocol/src/pong_command.cpp",
+    "implementation/protocol/src/register_application_command.cpp",
+    "implementation/protocol/src/register_event.cpp",
+    "implementation/protocol/src/register_events_command.cpp",
+    "implementation/protocol/src/registered_ack_command.cpp",
+    "implementation/protocol/src/release_service_command.cpp",
+    "implementation/protocol/src/remove_security_policy_command.cpp",
+    "implementation/protocol/src/remove_security_policy_response_command.cpp",
+    "implementation/protocol/src/request_service_command.cpp",
+    "implementation/protocol/src/resend_provided_events_command.cpp",
+    "implementation/protocol/src/routing_info_command.cpp",
+    "implementation/protocol/src/routing_info_entry.cpp",
+    "implementation/protocol/src/security_policy_response_command_base.cpp",
+    "implementation/protocol/src/send_command.cpp",
+    "implementation/protocol/src/service_command_base.cpp",
+    "implementation/protocol/src/simple_command.cpp",
+    "implementation/protocol/src/stop_offer_service_command.cpp",
+    "implementation/protocol/src/subscribe_ack_command.cpp",
+    "implementation/protocol/src/subscribe_ack_command_base.cpp",
+    "implementation/protocol/src/subscribe_command.cpp",
+    "implementation/protocol/src/subscribe_command_base.cpp",
+    "implementation/protocol/src/subscribe_nack_command.cpp",
+    "implementation/protocol/src/suspend_command.cpp",
+    "implementation/protocol/src/unregister_event_command.cpp",
+    "implementation/protocol/src/unsubscribe_ack_command.cpp",
+    "implementation/protocol/src/unsubscribe_command.cpp",
+    "implementation/protocol/src/update_security_credentials_command.cpp",
+    "implementation/protocol/src/update_security_policy_command.cpp",
+    "implementation/protocol/src/update_security_policy_response_command.cpp",
+]
+
+VSOMEIP_CORE_SECURITY_SRCS = [
+    "implementation/security/src/policy.cpp",
+    "implementation/security/src/policy_manager_impl.cpp",
+    "implementation/security/src/security.cpp",
+]
+
+VSOMEIP_CORE_TRACING_SRCS = [
+    "implementation/tracing/src/channel_impl.cpp",
+    "implementation/tracing/src/connector_impl.cpp",
+    "implementation/tracing/src/header.cpp",
+]
+
+# Utility — excludes the syscall wrappers (we don't link -Wl,-wrap,* here).
+VSOMEIP_CORE_UTILITY_SRCS = [
+    "implementation/utility/src/criticalsection.cpp",
+    "implementation/utility/src/utility.cpp",
+]
+
+# Routing-data classes — pure data carriers (`serviceinfo`,
+# `eventgroupinfo`, `event`, `remote_subscription`) handed around as
+# `shared_ptr<>` by the SD `host` callback surface. They live in
+# `implementation/routing/src/` for historical reasons but have no
+# routing-manager dependency, so they belong in core.
+VSOMEIP_CORE_ROUTING_DATA_SRCS = [
+    "implementation/routing/src/event.cpp",
+    "implementation/routing/src/eventgroupinfo.cpp",
+    "implementation/routing/src/remote_subscription.cpp",
+    "implementation/routing/src/serviceinfo.cpp",
+]
+
+VSOMEIP_CORE_SRCS = (
+    VSOMEIP_CORE_ENDPOINTS_SRCS +
+    VSOMEIP_CORE_LOGGER_SRCS +
+    VSOMEIP_CORE_MESSAGE_SRCS +
+    VSOMEIP_CORE_PLUGIN_SRCS +
+    VSOMEIP_CORE_PROTOCOL_SRCS +
+    VSOMEIP_CORE_SECURITY_SRCS +
+    VSOMEIP_CORE_TRACING_SRCS +
+    VSOMEIP_CORE_UTILITY_SRCS +
+    VSOMEIP_CORE_ROUTING_DATA_SRCS
+)
+
+# -----------------------------------------------------------------------------
+# Routing-layer sources — added on top of vsomeip-core to form vsomeip-lib
+# -----------------------------------------------------------------------------
+
+# Local/UDS IPC endpoints + peer-credential check + netlink + the endpoint
+# manager (base + impl). These exist only inside a routing-manager process.
+VSOMEIP_ROUTING_LAYER_ENDPOINTS_SRCS = [
+    "implementation/endpoints/src/credentials.cpp",
+    "implementation/endpoints/src/endpoint_manager_base.cpp",
+    "implementation/endpoints/src/endpoint_manager_impl.cpp",
+    "implementation/endpoints/src/local_client_endpoint_impl.cpp",
+    "implementation/endpoints/src/local_tcp_client_endpoint_impl.cpp",
+    "implementation/endpoints/src/local_tcp_server_endpoint_impl.cpp",
+    "implementation/endpoints/src/local_uds_client_endpoint_impl.cpp",
+    "implementation/endpoints/src/local_uds_server_endpoint_impl.cpp",
+    "implementation/endpoints/src/netlink_connector.cpp",
+    "implementation/endpoints/src/asio_netlink_factory.cpp",
+]
+
+VSOMEIP_ROUTING_LAYER_ROUTING_SRCS = [
+    "implementation/routing/src/routing_manager_base.cpp",
+    "implementation/routing/src/routing_manager_client.cpp",
+    "implementation/routing/src/routing_manager_impl.cpp",
+    "implementation/routing/src/routing_manager_stub.cpp",
+]
+
+VSOMEIP_ROUTING_LAYER_RUNTIME_SRCS = [
+    "implementation/runtime/src/application_impl.cpp",
+    "implementation/runtime/src/runtime.cpp",
+    "implementation/runtime/src/runtime_impl.cpp",
+]
+
+# `timer.cpp` wraps `boost::asio::steady_timer` behind
+# `abstract_socket_factory` so unit tests can mock the timer. No production
+# code path actually calls `vsomeip_v3::timer::create` — SD and the
+# routing manager use `boost::asio::steady_timer` directly. Keeping it in
+# core does no harm but bloats the core library with code that exists
+# purely for test mocking, so we live it in the routing layer alongside
+# the rest of the testable surface.
+VSOMEIP_ROUTING_LAYER_TIMER_SRCS = [
+    "implementation/endpoints/src/timer.cpp",
+]
+
+# `message_impl` is the SOME/IP message implementation. SD has its own
+# `vsomeip_v3::sd::message_impl` (in `implementation/service_discovery/`)
+# and never instantiates the core one, so moving `message_impl.cpp` out
+# of core leaves `libvsomeip3-core.so` free of `message_impl::*` symbols
+# (and the `runtime::get()->create_payload()` call its ctor would
+# otherwise contribute to core's undefined-symbol table).
+# `deserializer_message.cpp` carries the lone `deserializer::deserialize_message()`
+# method body — the only place in `deserializer.cpp` that referenced
+# `message_impl` — so the primitive `deserializer` used by SD stays in core.
+VSOMEIP_ROUTING_LAYER_MESSAGE_SRCS = [
+    "implementation/message/src/deserializer_message.cpp",
+    "implementation/message/src/message_impl.cpp",
+]
+
+VSOMEIP_ROUTING_LAYER_SRCS = (
+    VSOMEIP_ROUTING_LAYER_ENDPOINTS_SRCS +
+    VSOMEIP_ROUTING_LAYER_ROUTING_SRCS +
+    VSOMEIP_ROUTING_LAYER_RUNTIME_SRCS +
+    VSOMEIP_ROUTING_LAYER_TIMER_SRCS +
+    VSOMEIP_ROUTING_LAYER_MESSAGE_SRCS
+)
+
 # =============================================================================
 # Core vsomeip headers
 # =============================================================================
@@ -148,36 +377,23 @@ cc_library(
     name = "vsomeip-internal-hdrs",
     hdrs = VSOMEIP_INTERNAL_HDRS,
     defines = VSOMEIP_DEFINES,
-    strip_include_prefix = "/", 
+    include_prefix = "vsomeip",
+    strip_include_prefix = "/",
     visibility = ["//visibility:public"],
-    deps = [":vsomeip_hdrs"],
+    deps = [":vsomeip_hdrs"] + THIRD_PARTY_DEPS,
 )
 
 # =============================================================================
-# Core vsomeip library
+# Core vsomeip library — wire-level SOME/IP, no routing manager,
+# no application_impl, no UDS IPC, no netlink.
+# This is what `sd_host_lib` (and any future "SD-only" consumer) links
+# against; it is also the static foundation that `:vsomeip-lib` layers
+# the routing manager on top of.
 # =============================================================================
 
 cc_library(
-    name = "vsomeip-lib",
-    srcs = glob(
-        [
-            "implementation/endpoints/src/*.cpp",
-            "implementation/logger/src/*.cpp",
-            "implementation/tracing/src/*.cpp",
-            "implementation/message/src/*.cpp",
-            "implementation/plugin/src/*.cpp",
-            "implementation/protocol/src/*.cpp",
-            "implementation/routing/src/*.cpp",
-            "implementation/runtime/src/*.cpp",
-            "implementation/security/src/*.cpp",
-            "implementation/utility/src/*.cpp",
-        ],
-        exclude = [
-            # Exclude wrappers since we removed -Wl,-wrap,* linker options (see note above)
-            "implementation/utility/src/wrappers.cpp",
-            "implementation/utility/src/wrappers_qnx.cpp",
-        ],
-    ) + select({
+    name = "vsomeip-core-lib",
+    srcs = VSOMEIP_CORE_SRCS + select({
         ":is_multiple_routing_managers_enabled": [
             "implementation/configuration/src/configuration_impl.cpp",
         ],
@@ -196,55 +412,146 @@ cc_library(
     }),
     includes = ["interface"],
     linkopts = VSOMEIP_LINKOPTS,
-    deps = VSOMEIP_DEPS + [":vsomeip-internal-hdrs"],
+    linkstatic = False,
     visibility = ["//visibility:public"],
+    deps = VSOMEIP_DEPS + [":vsomeip-internal-hdrs"],
+)
+
+cc_shared_library(
+    name = "vsomeip3-core",
+    # vsomeip-core transitively pulls in boost.* and spdlog (which itself
+    # pulls in fmt). Mark them as exported by this shared library so the
+    # downstream cc_shared_libraries that DT_NEEDED-depend on us
+    # (`vsomeip3`, `vsomeip3-sd`, `vsomeip3-cfg`) know those symbols are
+    # already resolved here and need not be re-bundled.
+    exports_filter = [
+        "@fmt",
+        # Transitive libraries the boost.* deps above pull in. They are
+        # linked statically into libvsomeip3-core.so, so the downstream
+        # cc_shared_libraries that DT_NEEDED-depend on us (`vsomeip3`,
+        # `vsomeip3-sd`, `vsomeip3-cfg`) must be told they are already
+        # exported here — otherwise cc_shared_library flags them as
+        # "linked statically by different cc_shared_libraries but not
+        # exported".
+        "@boost.asio//:asio_openssl",
+        "@boost.asio",
+        "@boost.coroutine",
+        "@boost.context",
+        "@boost.container",
+        "@boost.chrono",
+        "@boost.thread",
+        "@boost.process",
+        "@boost.filesystem",
+        "@boost.serialization",
+        "@openssl//:ssl",
+        "@openssl//:crypto",
+    ],
+    deps = [":vsomeip-core-lib"],
+)
+
+# cc_import wrapper so external consumers can depend on libvsomeip3-core.so
+# with one label. Consumers only get the pulic headers with this target.
+cc_import(
+    name = "vsomeip-core",
+    shared_library = ":vsomeip3-core",
+    deps = [":vsomeip_hdrs"],
+)
+
+# =============================================================================
+# Full vsomeip library — vsomeip-core + routing manager + application_impl
+# + UDS IPC + netlink. This is the surface that downstream tests and any
+# normal vsomeip application links against.
+# =============================================================================
+
+cc_library(
+    name = "vsomeip-lib",
+    srcs = VSOMEIP_ROUTING_LAYER_SRCS,
+    copts = VSOMEIP_COPTS,
+    # MUST match vsomeip-core-lib: application_impl.cpp keys on
+    # VSOMEIP_ENABLE_MULTIPLE_ROUTING_MANAGERS to construct configuration_impl
+    # directly. Without it, init() takes the cfg-plugin dlopen path and aborts
+    # ("Configuration module could not be loaded") -- breaking every full
+    # vsomeip application (all the someip drivers).
+    defines = VSOMEIP_DEFINES + select({
+        ":is_multiple_routing_managers_enabled": [
+            "VSOMEIP_ENABLE_MULTIPLE_ROUTING_MANAGERS",
+        ],
+        "//conditions:default": [],
+    }),
+    includes = ["interface"],
+    linkopts = VSOMEIP_LINKOPTS,
+    visibility = ["//visibility:public"],
+    # Re-export `:vsomeip-core` so anything statically linking
+    # `:vsomeip-lib` (the unit tests, downstream cc_binaries) gets both
+    # tiers in one dep, matching the pre-split behaviour.
+    #
+    # `:vsomeip-internal-hdrs` is now listed explicitly here because the
+    # `:vsomeip-core` cc_import deliberately does not propagates it
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip-internal-hdrs",
+    ],
 )
 
 cc_shared_library(
     name = "vsomeip3",
+    # libvsomeip3.so DT_NEEDED-loads libvsomeip3-core.so at runtime, so
+    # the core objects are not duplicated into vsomeip3.so. Singletons
+    # (`plugin_manager::get()`, logger globals, configuration impl)
+    # therefore have exactly one home — `libvsomeip3-core.so.3` — across
+    # vsomeip3.so / vsomeip3-sd.so / vsomeip3-cfg.so.
+    dynamic_deps = [":vsomeip3-core"],
     deps = [":vsomeip-lib"],
 )
 
-# the default rule should always be a shared library regardless of whether link-static is False
-# if we use static linkage, but plugins use dynamic linkage, we will get duplicate symbols in 2 different translation
-# units causing problems.
+# Public boundary for external vsomeip consumers.
 cc_import(
     name = "vsomeip",
-    shared_library = ":vsomeip3", 
-    deps = VSOMEIP_DEPS, 
+    shared_library = ":vsomeip3",
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip_hdrs",
+    ],
 )
 
 # =============================================================================
 # Configuration library (vsomeip-cfg)
-# Only built when NOT using multiple routing managers
+# When --//:multiple_routing_managers_enabled=False this is the .so that
+# applications dlopen to get a `configuration` implementation. When the
+# flag is True, `configuration_impl.cpp` is folded into libvsomeip3-core.so
+# instead and vsomeip3-cfg.so contains only `configuration_plugin_impl.cpp`.
 # =============================================================================
+
+VSOMEIP_CFG_SRCS = select({
+    ":is_multiple_routing_managers_enabled": [
+        "implementation/configuration/src/configuration_plugin_impl.cpp",
+    ],
+    "//conditions:default": [
+        "implementation/configuration/src/configuration_impl.cpp",
+        "implementation/configuration/src/configuration_plugin_impl.cpp",
+    ],
+})
 
 cc_library(
     name = "vsomeip-cfg",
-    srcs = glob(
-        [
-            "implementation/configuration/src/*.cpp",
-            "implementation/configuration/include/*.hpp",
-            "implementation/utility/include/service_instance_map.hpp",
-            "implementation/tracing/include/enumeration_types.hpp",
-        ],
-    ) + [
-        "implementation/e2e_protection/include/e2exf/config.hpp",
-    ],
+    srcs = VSOMEIP_CFG_SRCS,
+    hdrs = VSOMEIP_INTERNAL_HDRS,
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    # Depend on the cc_library form of vsomeip so consumers (notably the unit
-    # tests) can statically link a single, consistent copy of vsomeip's TUs.
-    # The shared-library form (vsomeip3.so) is wired up below via
-    # cc_shared_library.dynamic_deps so the production .so still links
-    # dynamically against libvsomeip3.so rather than re-bundling its objects.
-    deps = [":vsomeip-lib"],
+    # vsomeip-cfg only needs the core symbols (logger, plugin_manager,
+    # configuration interface). The dlopen-time link is wired via
+    # cc_shared_library.dynamic_deps below.
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip-internal-hdrs",
+    ],
 )
 
 cc_shared_library(
     name = "vsomeip3-cfg-unversioned",
-    dynamic_deps = [":vsomeip3"],
+    dynamic_deps = [":vsomeip3-core"],
+    user_link_flags = ["-Wl,-soname,libvsomeip3-cfg.so.3"],
     deps = [":vsomeip-cfg"],
 )
 
@@ -258,26 +565,64 @@ genrule(
 
 # =============================================================================
 # Service Discovery library (vsomeip-sd)
+#
+# vsomeip-sd only needs symbols from vsomeip-core (logger, plugin_manager,
+# the routing-data classes, udp_server_endpoint_impl, the configuration
+# interface). DT_NEEDED against libvsomeip3-core.so.3 — never against
+# libvsomeip3.so.3 — so a process that only links libvsomeip3-core.so +
+# libvsomeip3-sd.so does not drag in the routing manager, application_impl,
+# UDS IPC, or the netlink connector.
 # =============================================================================
 
+VSOMEIP_SD_SRCS = [
+    "implementation/service_discovery/src/configuration_option_impl.cpp",
+    "implementation/service_discovery/src/deserializer.cpp",
+    "implementation/service_discovery/src/entry_impl.cpp",
+    "implementation/service_discovery/src/eventgroupentry_impl.cpp",
+    "implementation/service_discovery/src/ip_option_impl.cpp",
+    "implementation/service_discovery/src/ipv4_option_impl.cpp",
+    "implementation/service_discovery/src/ipv6_option_impl.cpp",
+    "implementation/service_discovery/src/load_balancing_option_impl.cpp",
+    "implementation/service_discovery/src/message_element_impl.cpp",
+    "implementation/service_discovery/src/message_impl.cpp",
+    "implementation/service_discovery/src/option_impl.cpp",
+    "implementation/service_discovery/src/protection_option_impl.cpp",
+    "implementation/service_discovery/src/remote_subscription_ack.cpp",
+    "implementation/service_discovery/src/request.cpp",
+    "implementation/service_discovery/src/runtime_impl.cpp",
+    "implementation/service_discovery/src/selective_option_impl.cpp",
+    "implementation/service_discovery/src/service_discovery_impl.cpp",
+    "implementation/service_discovery/src/serviceentry_impl.cpp",
+    "implementation/service_discovery/src/subscription.cpp",
+    "implementation/service_discovery/src/unknown_option_impl.cpp",
+]
+
 cc_library(
-    name = "vsomeip-sd",
-    srcs = glob([
-        "implementation/service_discovery/src/*.cpp",
-    ]),
+    name = "vsomeip-sd-lib",
+    srcs = VSOMEIP_SD_SRCS,
     hdrs = VSOMEIP_INTERNAL_HDRS,
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     include_prefix = "vsomeip",
     linkopts = VSOMEIP_LINKOPTS,
-    # See note on vsomeip-cfg deps.
-    deps = [":vsomeip-lib"],
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip-internal-hdrs",
+    ],
 )
 
 cc_shared_library(
     name = "vsomeip3-sd-unversioned",
-    dynamic_deps = [":vsomeip3"],
-    deps = [":vsomeip-sd"],
+    dynamic_deps = [":vsomeip3-core"],
+    # Stamp DT_SONAME so the file produced here advertises the name the
+    # plugin manager dlopens (`internal.hpp` → VSOMEIP_SD_LIBRARY) and the
+    # genrule below renames it to. Any downstream binary that DT_NEEDED's
+    # `:vsomeip-sd` then records the same string in its NEEDED slot,
+    # which means service_discovery_impl::init()'s plugin_manager dlopen
+    # finds the lib already loaded and just bumps the refcount — no
+    # second mapping, no LD_LIBRARY_PATH search.
+    user_link_flags = ["-Wl,-soname,libvsomeip3-sd.so.3"],
+    deps = [":vsomeip-sd-lib"],
 )
 
 # Create versioned library name that vsomeip expects
@@ -288,25 +633,59 @@ genrule(
     cmd = "cp $(location :vsomeip3-sd-unversioned) $@",
 )
 
+cc_import(
+    name = "vsomeip-sd",
+    shared_library = ":vsomeip3-sd",
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip-internal-hdrs",
+    ],
+)
+
 # =============================================================================
 # E2E Protection library (vsomeip-e2e)
+#
+# e2e is loaded by the routing manager (see `routing_manager_impl::init`),
+# so it lives in the full-vsomeip world and DT_NEEDED's libvsomeip3.so.3
+# rather than libvsomeip3-core.so.3.
 # =============================================================================
+
+VSOMEIP_E2E_SRCS = [
+    "implementation/e2e_protection/src/buffer/buffer.cpp",
+    "implementation/e2e_protection/src/crc/crc.cpp",
+    "implementation/e2e_protection/src/e2e/profile/e2e_provider_impl.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile01/checker.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile01/profile_01.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile01/protector.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile04/checker.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile04/profile_04.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile04/protector.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile05/checker.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile05/profile_05.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile05/protector.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile07/checker.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile07/profile_07.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile07/protector.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile_custom/checker.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile_custom/profile_custom.cpp",
+    "implementation/e2e_protection/src/e2e/profile/profile_custom/protector.cpp",
+    "implementation/e2e_protection/src/e2exf/config.cpp",
+]
 
 cc_library(
     name = "vsomeip-e2e",
-    srcs = glob([
-        "implementation/e2e_protection/src/**/*.cpp",
-    ]) + VSOMEIP_INTERNAL_HDRS,
+    srcs = VSOMEIP_E2E_SRCS,
+    hdrs = VSOMEIP_INTERNAL_HDRS,
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    # See note on vsomeip-cfg deps.
     deps = [":vsomeip-lib"],
 )
 
 cc_shared_library(
     name = "vsomeip3-e2e-unversioned",
     dynamic_deps = [":vsomeip3"],
+    user_link_flags = ["-Wl,-soname,libvsomeip3-e2e.so.3"],
     deps = [":vsomeip-e2e"],
 )
 

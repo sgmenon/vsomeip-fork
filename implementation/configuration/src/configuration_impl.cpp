@@ -3156,6 +3156,22 @@ std::shared_ptr<client> configuration_impl::find_client(service_t _service, inst
     return nullptr;
 }
 
+std::vector<std::shared_ptr<service>> configuration_impl::get_services() const {
+    std::lock_guard<std::mutex> its_lock(services_mutex_);
+    std::vector<std::shared_ptr<service>> result;
+    result.reserve(services_.size());
+    for (const auto& entry : services_) {
+        result.push_back(entry.second);
+    }
+    return result;
+}
+
+std::vector<std::shared_ptr<client>> configuration_impl::get_clients() const {
+    // clients_ is populated once during load() and not mutated afterwards,
+    // mirroring find_client() which also iterates without a lock.
+    return {clients_.begin(), clients_.end()};
+}
+
 void configuration_impl::get_event_update_properties(service_t _service, instance_t _instance, event_t _event,
                                                      std::chrono::milliseconds& _cycle, bool& _change_resets_cycle,
                                                      bool& _update_on_change) const {

@@ -179,6 +179,9 @@ struct base_fake_socket_fixture : ::testing::Test {
 
 private:
     static std::shared_ptr<fake_socket_factory> factory_;
+#if defined(__linux__)
+    static std::shared_ptr<fake_netlink_factory> netlink_factory_;
+#endif
     std::shared_ptr<socket_manager> socket_manager_{std::make_shared<socket_manager>()};
     std::map<std::string, std::unique_ptr<app>> name_to_client_;
 };

@@ -5,7 +5,25 @@ load("@rules_cc//cc:defs.bzl", "cc_test")
 cc_test(
     name = "netlink_tests",
     srcs = glob(["*.cpp"]),
-    copts = ["-std=c++20"],
+    args = ["--gtest_filter=-*start_stop*:*start_error_and_stop*:*recover_after_first_request*:*multicast_route_available*"],
+    deps = [
+        "//:vsomeip-lib",
+        "//test/common:vsomeip_utilities",
+        "//test/unit_tests:test_main",
+        "@boost.asio",
+        "@boost.system",
+        "@googletest//:gtest",
+    ],
+)
+
+cc_test(
+    name = "netlink_tests_live",
+    srcs = glob(["*.cpp"]),
+    args = ["--gtest_filter=*start_stop*:*start_error_and_stop*:*recover_after_first_request*:*multicast_route_available*"],
+    tags = [
+        "manual",
+        "requires-network",
+    ],
     deps = [
         "//:vsomeip-lib",
         "//test/common:vsomeip_utilities",

@@ -40,6 +40,9 @@
 #include "../../endpoints/include/udp_server_endpoint_impl.hpp"
 #include "../../endpoints/include/abstract_socket_factory.hpp"
 #include "../../endpoints/include/virtual_server_endpoint_impl.hpp"
+#if defined(__linux__)
+#include "../../endpoints/include/abstract_netlink_factory.hpp"
+#endif
 #include "../../message/include/deserializer.hpp"
 #include "../../message/include/message_impl.hpp"
 #include "../../message/include/serializer.hpp"
@@ -215,8 +218,12 @@ void routing_manager_impl::start() {
     VSOMEIP_INFO << "Client [" << std::hex << std::setfill('0') << std::setw(4) << get_client()
                  << "] routes unicast:" << its_unicast.to_string() << ", " << its_netmask_or_prefix.str();
 
-    netlink_connector_ =
-            abstract_socket_factory::get()->create_netlink_connector(host_->get_io(), configuration_->get_unicast_address(), its_multicast);
+    // The netlink factory is held as a separate injector (split out of
+    // abstract_socket_factory) so the netlink_connector vtable stays
+    // out of libvsomeip3-core.so. `get()` lazily installs the production
+    // asio impl on first call, mirroring `abstract_socket_factory::get()`.
+    netlink_connector_ = abstract_netlink_factory::get()->create_netlink_connector(
+            host_->get_io(), configuration_->get_unicast_address(), its_multicast);
     netlink_connector_->register_net_if_changes_handler(std::bind(&routing_manager_impl::on_net_interface_or_route_state_changed, this,
                                                                   std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
     netlink_connector_->start();

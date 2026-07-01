@@ -7,6 +7,9 @@
 #define VSOMEIP_V3_TESTING_FAKE_SOCKET_FACTORY_HPP_
 
 #include "../../../implementation/endpoints/include/abstract_socket_factory.hpp"
+#if defined(__linux__)
+#include "../../../implementation/endpoints/include/abstract_netlink_factory.hpp"
+#endif
 #include "../../../implementation/endpoints/include/asio_timer.hpp"
 
 #include "fake_netlink_connector.hpp"
@@ -29,11 +32,6 @@ public:
     void set_manager(std::shared_ptr<socket_manager> const& _sm) { socket_manager_ = _sm; }
 
 private:
-    std::shared_ptr<abstract_netlink_connector> create_netlink_connector(boost::asio::io_context& _io, const boost::asio::ip::address&,
-                                                                         const boost::asio::ip::address&, bool) override {
-        return std::make_shared<fake_netlink_connector>(_io);
-    }
-
     virtual std::unique_ptr<tcp_socket> create_tcp_socket(boost::asio::io_context& _io) override {
         if (auto sm = socket_manager_.lock()) {
             auto state = std::make_shared<fake_tcp_socket_handle>(_io);
@@ -57,6 +55,23 @@ private:
 
     std::weak_ptr<socket_manager> socket_manager_;
 };
+
+#if defined(__linux__)
+/**
+ * Fake impl of the abstract_netlink_factory injector. Always hands back
+ * a `fake_netlink_connector`, which immediately fires
+ * `handler_(true, "fake-interface", true)` on start so the routing
+ * manager reaches its post-netlink steady state in tests.
+ **/
+class fake_netlink_factory : public abstract_netlink_factory {
+public:
+    std::shared_ptr<abstract_netlink_connector>
+    create_netlink_connector(boost::asio::io_context& _io, const boost::asio::ip::address&,
+                             const boost::asio::ip::address&, bool) override {
+        return std::make_shared<fake_netlink_connector>(_io);
+    }
+};
+#endif // defined(__linux__)
 }
 
 #endif

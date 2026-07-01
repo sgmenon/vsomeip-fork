@@ -276,30 +276,33 @@ TEST_F(test_timer_with_asio, a_stopped_timer_will_not_execute_the_handler) {
 }
 
 TEST_F(test_timer_with_asio, a_timer_stopped_during_execution_from_another_thread_is_not_restarted) {
-    std::mutex mtx;
-    std::condition_variable cv;
-    int step{0};
+    // Two promise/future pairs form the bidirectional handshake between the
+    // timer callback (running on the main thread via io_.poll_one) and the
+    // stopper thread:
+    //   1. callback_started: timer -> stopper -- "I have fired, please stop me"
+    //   2. stopper_finished:  stopper -> timer -- "I have called stop(), you may return"
+    // This replaces a mutex + condition_variable + int step handshake that TSan
+    // v2 flags as a spurious "double lock" -- the cv.wait_for release path is
+    // not fully tracked in the libtsan shipped with gcc 11.
+    std::promise<void> callback_started_promise;
+    std::promise<void> stopper_finished_promise;
+    auto callback_started = callback_started_promise.get_future();
+    auto stopper_finished = stopper_finished_promise.get_future();
+
     uint32_t execution_count{0};
     auto timeout = 5ms;
 
-    // the timer notifies the stopper to stop the timer and waits for the stop
-    // to have been called.
     auto timer = timer::create(io_, timeout, [&] {
-        std::unique_lock lock{mtx};
         ++execution_count;
-        ++step;
-        cv.notify_one();
-        lock.unlock();
-        cv.wait_for(lock, 5s, [&] { return step == 2; });
+        callback_started_promise.set_value();
+        stopper_finished.wait_for(5s);
         return true;
     });
 
     auto stopper = std::thread([&] {
-        std::unique_lock lock{mtx};
-        cv.wait_for(lock, 5s, [&] { return step == 1; });
+        callback_started.wait_for(5s);
         timer->stop();
-        ++step;
-        cv.notify_one();
+        stopper_finished_promise.set_value();
     });
 
     timer->start();

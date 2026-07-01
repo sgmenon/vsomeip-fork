@@ -34,7 +34,6 @@
 #include "../../endpoints/include/client_endpoint.hpp"
 #include "../../endpoints/include/endpoint_definition.hpp"
 #include "../../endpoints/include/tcp_server_endpoint_impl.hpp"
-#include "../../endpoints/include/udp_server_endpoint_impl.hpp"
 #include "../../message/include/serializer.hpp"
 #include "../../plugin/include/plugin_manager_impl.hpp"
 #include "../../routing/include/event.hpp"
@@ -166,11 +165,11 @@ void service_discovery_impl::start() {
 
         // rejoin multicast group
         if (endpoint_ && !reliable_) {
-            auto its_server_endpoint = std::dynamic_pointer_cast<udp_server_endpoint_impl>(endpoint_);
-            if (its_server_endpoint && !its_server_endpoint->is_joined(sd_multicast_)) {
-                VSOMEIP_INFO << "sd::" << __func__ << ": calling its_server_endpoint->join(" << sd_multicast_
-                             << ")  its_server_endpoint = " << its_server_endpoint;
-                its_server_endpoint->join(sd_multicast_);
+            auto its_multicast_endpoint = std::dynamic_pointer_cast<multicast_endpoint>(endpoint_);
+            if (its_multicast_endpoint && !its_multicast_endpoint->is_joined(sd_multicast_)) {
+                VSOMEIP_INFO << "sd::" << __func__ << ": calling its_multicast_endpoint->join(" << sd_multicast_
+                             << ")  its_multicast_endpoint = " << its_multicast_endpoint;
+                its_multicast_endpoint->join(sd_multicast_);
             }
         }
     }
@@ -3050,10 +3049,10 @@ void service_discovery_impl::on_last_msg_received_timer_expired(const boost::sys
 
         // Rejoin multicast group
         if (endpoint_ && !reliable_) {
-            auto its_server_endpoint = std::dynamic_pointer_cast<udp_server_endpoint_impl>(endpoint_);
-            if (its_server_endpoint) {
-                its_server_endpoint->leave(sd_multicast_);
-                its_server_endpoint->join(sd_multicast_);
+            auto its_multicast_endpoint = std::dynamic_pointer_cast<multicast_endpoint>(endpoint_);
+            if (its_multicast_endpoint) {
+                its_multicast_endpoint->leave(sd_multicast_);
+                its_multicast_endpoint->join(sd_multicast_);
             }
         }
         start_last_msg_received_timer();

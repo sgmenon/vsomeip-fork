@@ -3,6 +3,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+#include <memory>
+
 #include <gtest/gtest.h>
 
 #include "../../../implementation/message/include/payload_impl.hpp"
@@ -27,11 +29,11 @@ bool dont_omit_last_byte = false;
 TEST(serialize_test, serialize_from_serializable_pointer) {
     std::vector<vsomeip_v3::byte_t> data_vector_{uint8_num1, uint8_num2, uint8_num3, uint8_num1};
 
-    auto its_serializable = new vsomeip_v3::payload_impl(data_vector_);
+    auto its_serializable = std::make_unique<vsomeip_v3::payload_impl>(data_vector_);
 
     std::unique_ptr<vsomeip_v3::serializer> its_serializer(new vsomeip_v3::serializer(1));
 
-    ASSERT_TRUE(its_serializer->serialize(its_serializable));
+    ASSERT_TRUE(its_serializer->serialize(its_serializable.get()));
     ASSERT_EQ(its_serializer->get_size(), 4);
 }
 

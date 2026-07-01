@@ -28,6 +28,7 @@ cc_library(
         "include/common/*.hpp",
         "include/common/external/*.hpp",
     ]),
+    # `process.cpp` uses `std::map::contains()` (C++20).
     copts = ["-std=c++20"],
     strip_include_prefix = "include",
     deps = [

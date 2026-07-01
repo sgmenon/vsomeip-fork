@@ -14,13 +14,6 @@ class asio_socket_factory final : public abstract_socket_factory {
 public:
     ~asio_socket_factory() override = default;
 
-#if defined(__linux__)
-    std::shared_ptr<abstract_netlink_connector> create_netlink_connector(boost::asio::io_context& _io,
-                                                                         const boost::asio::ip::address& _address,
-                                                                         const boost::asio::ip::address& _multicast_address,
-                                                                         bool _is_requiring_link) override;
-#endif
-
     std::unique_ptr<tcp_socket> create_tcp_socket(boost::asio::io_context& _io) override;
     std::unique_ptr<tcp_acceptor> create_tcp_acceptor(boost::asio::io_context& _io) override;
     std::unique_ptr<abstract_timer> create_timer(boost::asio::io_context& _io) override;

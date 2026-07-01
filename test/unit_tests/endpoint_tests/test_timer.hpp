@@ -10,10 +10,11 @@
 #include <boost/system/error_code.hpp>
 #include <gtest/gtest.h>
 
-#include <thread>
 #include <chrono>
+#include <future>
 #include <memory>
 #include <optional>
+#include <thread>
 
 #include "../../../implementation/endpoints/include/timer.hpp"
 #include "../../../implementation/endpoints/include/asio_timer.hpp"
@@ -47,11 +48,6 @@ public:
 
 class fake_factory : public abstract_socket_factory {
 public:
-    std::shared_ptr<abstract_netlink_connector> create_netlink_connector(boost::asio::io_context&, const boost::asio::ip::address&,
-                                                                         const boost::asio::ip::address&, bool) override {
-        return nullptr;
-    }
-
     virtual std::unique_ptr<tcp_socket> create_tcp_socket(boost::asio::io_context&) override { return nullptr; }
     virtual std::unique_ptr<tcp_acceptor> create_tcp_acceptor(boost::asio::io_context&) override { return nullptr; }
     virtual std::unique_ptr<abstract_timer> create_timer(boost::asio::io_context&) override { return std::move(timer_); }

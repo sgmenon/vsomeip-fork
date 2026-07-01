@@ -6,6 +6,7 @@
 #ifndef VSOMEIP_V3_DESERIALIZER_HPP
 #define VSOMEIP_V3_DESERIALIZER_HPP
 
+#include <memory>
 #include <vector>
 
 #include <vsomeip/export.hpp>
@@ -36,7 +37,7 @@ public:
     VSOMEIP_EXPORT void set_remaining(std::size_t _remaining);
 
     // to be used by applications to deserialize a message
-    VSOMEIP_EXPORT message_impl* deserialize_message();
+    VSOMEIP_EXPORT std::unique_ptr<message_impl> deserialize_message();
 
     // to be used (internally) by objects to deserialize their members
     // Note: this needs to be encapsulated!

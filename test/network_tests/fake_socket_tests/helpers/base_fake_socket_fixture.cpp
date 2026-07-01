@@ -9,9 +9,15 @@
 #define LOCAL_LOG TEST_LOG << "[fixture] "
 namespace vsomeip_v3::testing {
 std::shared_ptr<fake_socket_factory> base_fake_socket_fixture::factory_ = std::make_shared<fake_socket_factory>();
+#if defined(__linux__)
+std::shared_ptr<fake_netlink_factory> base_fake_socket_fixture::netlink_factory_ = std::make_shared<fake_netlink_factory>();
+#endif
 
 void base_fake_socket_fixture::SetUpTestSuite() {
     vsomeip_v3::set_abstract_factory(factory_);
+#if defined(__linux__)
+    vsomeip_v3::set_abstract_netlink_factory(netlink_factory_);
+#endif
 }
 
 base_fake_socket_fixture::base_fake_socket_fixture() {

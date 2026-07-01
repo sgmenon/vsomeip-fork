@@ -8,6 +8,10 @@
 #include <vsomeip/primitive_types.hpp>
 
 #include "../../../implementation/message/include/deserializer.hpp"
+// message_impl.hpp is needed because deserialize_message() now returns
+// std::unique_ptr<message_impl>; instantiating the destructor of the returned
+// temporary requires the complete type.
+#include "../../../implementation/message/include/message_impl.hpp"
 #include "../../../implementation/utility/include/bithelper.hpp"
 
 namespace {

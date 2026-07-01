@@ -9,6 +9,7 @@
 #include <boost/asio/ip/udp.hpp>
 #include <vsomeip/defines.hpp>
 
+#include "endpoint.hpp"
 #include "server_endpoint_impl.hpp"
 #include "tp_reassembler.hpp"
 
@@ -20,7 +21,7 @@ using on_unicast_sent_cbk_t = std::function<void(const byte_t*, length_t, const 
 // callback type to own multicast messages received
 using on_sent_multicast_received_cbk_t = std::function<void(const byte_t*, length_t, const boost::asio::ip::address&)>;
 
-class udp_server_endpoint_impl : public udp_server_endpoint_base_impl {
+class udp_server_endpoint_impl : public udp_server_endpoint_base_impl, public multicast_endpoint {
 
 public:
     udp_server_endpoint_impl() = delete;
@@ -45,9 +46,9 @@ public:
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
                                             std::chrono::nanoseconds* _maximum_retention) const override;
 
-    VSOMEIP_EXPORT void join(const std::string& _address);
+    VSOMEIP_EXPORT void join(const std::string& _address) override;
     VSOMEIP_EXPORT void join_unlocked(const std::string& _address);
-    VSOMEIP_EXPORT void leave(const std::string& _address);
+    VSOMEIP_EXPORT void leave(const std::string& _address) override;
     VSOMEIP_EXPORT void set_multicast_option(const boost::asio::ip::address& _address, bool _is_join, boost::system::error_code& _error);
 
     void add_default_target(service_t _service, const std::string& _address, uint16_t _port) override;
@@ -67,7 +68,7 @@ public:
     void set_receive_own_multicast_messages(bool value);
 
     bool is_joining() const;
-    bool is_joined(const std::string& _address) const;
+    bool is_joined(const std::string& _address) const override;
     bool is_joined(const std::string& _address, bool& _received) const;
 
     /// @brief Disconnects from the given client.

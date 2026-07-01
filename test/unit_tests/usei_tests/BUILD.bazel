@@ -7,8 +7,10 @@ load("@rules_cc//cc:defs.bzl", "cc_test")
 
 cc_test(
     name = "usei_tests",
-    srcs = glob(["*.cpp", "*.hpp"]),
-    copts = ["-std=c++20"],
+    srcs = glob([
+        "*.cpp",
+        "*.hpp",
+    ]),
     # The "no_overwrite_during_restart_with_multicast" subtest relies on
     # mock-injected template instantiations of endpoint_impl<udp> /
     # server_endpoint_impl<udp> shadowing the real ones. Under the static

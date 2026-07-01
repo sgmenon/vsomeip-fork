@@ -280,6 +280,9 @@ public:
     VSOMEIP_EXPORT std::shared_ptr<policy_manager_impl> get_policy_manager() const;
     VSOMEIP_EXPORT std::shared_ptr<security> get_security() const;
 
+    VSOMEIP_EXPORT std::vector<std::shared_ptr<service>> get_services() const;
+    VSOMEIP_EXPORT std::vector<std::shared_ptr<client>> get_clients() const;
+
 private:
     void read_data(const std::set<std::string>& _input, std::vector<configuration_element>& _elements, std::set<std::string>& _failed,
                    bool _mandatory_only, bool _read_second_level = false);

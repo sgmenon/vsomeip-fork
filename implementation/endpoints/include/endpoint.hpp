@@ -62,6 +62,19 @@ public:
     virtual void set_connected(bool _connected) = 0;
 };
 
+// Mixin interface for endpoints that participate in IP multicast group
+// membership. Implemented by udp_server_endpoint_impl. Kept separate from
+// `endpoint` so that consumers (e.g. service_discovery_impl) can downcast
+// only to the multicast facet without needing the full
+// udp_server_endpoint_impl type.
+class multicast_endpoint {
+public:
+    virtual ~multicast_endpoint() = default;
+    virtual void join(const std::string& _address) = 0;
+    virtual void leave(const std::string& _address) = 0;
+    virtual bool is_joined(const std::string& _address) const = 0;
+};
+
 } // namespace vsomeip_v3
 
 #endif // VSOMEIP_V3_ENDPOINT_HPP_

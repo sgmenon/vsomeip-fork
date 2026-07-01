@@ -11,7 +11,8 @@
 
 #include <array>
 #include <atomic>
-#include <condition_variable>
+#include <chrono>
+#include <future>
 #include <mutex>
 #include <thread>
 
@@ -115,17 +116,16 @@ using namespace testing;
 TEST_F(usei_fixture, basic) {
     using namespace std::chrono_literals;
 
-    std::mutex sync;
-    bool received{false};
-    std::condition_variable event;
+    // A promise/future pair replaces the mutex + condition_variable + bool
+    // trio: cleaner ownership semantics across the io_context thread and the
+    // test thread, and avoids a spurious TSan v2 "double lock" warning that
+    // libtsan reports for the cv.wait_for pattern in this configuration.
+    std::promise<void> received_promise;
+    auto received_future = received_promise.get_future();
 
     EXPECT_CALL(*routing_, on_message)
             .WillOnce([&](const vsomeip_v3::byte_t*, vsomeip_v3::length_t, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
-                          const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) {
-                std::unique_lock lock(sync);
-                received = true;
-                event.notify_one();
-            });
+                          const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) { received_promise.set_value(); });
 
     boost::system::error_code error;
     server_->init(unicast_parameters_, error);
@@ -133,8 +133,7 @@ TEST_F(usei_fixture, basic) {
 
     send(unicast_parameters_, make_bytes(0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x00, 0x08, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C));
 
-    std::unique_lock lock(sync);
-    EXPECT_EQ(event.wait_for(lock, 5s, [&] { return received; }), true);
+    EXPECT_EQ(received_future.wait_for(5s), std::future_status::ready);
 
     server_->stop(false);
 }
@@ -147,18 +146,20 @@ TEST_F(usei_fixture, corrupted_data) {
     auto end_message = make_bytes(0x1A, 0x1B, 0x1C, 0x1D, 0x00, 0x00, 0x00, 0x08, 0x1E, 0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x025);
 
     constexpr size_t MESSAGE_SENT_COUNT = 10000;
-    std::mutex sync;
-    bool received{false};
-    std::condition_variable event;
+
+    // WillRepeatedly may match many times; std::call_once guarantees the
+    // promise is only satisfied once (calling set_value twice would throw
+    // std::future_error(promise_already_satisfied)).
+    std::promise<void> received_promise;
+    auto received_future = received_promise.get_future();
+    std::once_flag received_once;
 
     EXPECT_CALL(*endpoint_, on_error).Times(AtLeast(MESSAGE_SENT_COUNT / 20));
     EXPECT_CALL(*routing_, on_message)
             .WillRepeatedly([&](const vsomeip_v3::byte_t* data, vsomeip_v3::length_t len, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
                                 const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) {
                 if (len == 16 && data[0] == 0x1A && data[1] == 0x1B && data[2] == 0x1C && data[3] == 0x1D) {
-                    std::unique_lock lock(sync);
-                    received = true;
-                    event.notify_one();
+                    std::call_once(received_once, [&] { received_promise.set_value(); });
                 }
             });
 
@@ -175,8 +176,7 @@ TEST_F(usei_fixture, corrupted_data) {
 
     send(unicast_parameters_, end_message);
 
-    std::unique_lock lock(sync);
-    EXPECT_EQ(event.wait_for(lock, 5s, [&] { return received; }), true);
+    EXPECT_EQ(received_future.wait_for(5s), std::future_status::ready);
 
     server_->stop(false);
 }
@@ -184,17 +184,12 @@ TEST_F(usei_fixture, corrupted_data) {
 TEST_F(usei_fixture, basic_multicast) {
     using namespace std::chrono_literals;
 
-    std::mutex sync;
-    bool received{false};
-    std::condition_variable event;
+    std::promise<void> received_promise;
+    auto received_future = received_promise.get_future();
 
     EXPECT_CALL(*routing_, on_message)
             .WillOnce([&](const vsomeip_v3::byte_t*, vsomeip_v3::length_t, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
-                          const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) {
-                std::unique_lock lock(sync);
-                received = true;
-                event.notify_one();
-            });
+                          const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) { received_promise.set_value(); });
 
     boost::system::error_code error;
     server_->init(unicast_parameters_, error);
@@ -204,8 +199,7 @@ TEST_F(usei_fixture, basic_multicast) {
     send(multicast_parameters_,
          make_bytes(0x01, 0x02, 0x03, 0x04, 0x00, 0x00, 0x00, 0x09, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D));
 
-    std::unique_lock lock(sync);
-    EXPECT_EQ(event.wait_for(lock, 5s, [&] { return received; }), true);
+    EXPECT_EQ(received_future.wait_for(5s), std::future_status::ready);
 
     server_->joined_.clear(); // We don't want to call `leave` method, so we do its job
     server_->set_multicast_option(multicast_parameters_.address(), false, error);

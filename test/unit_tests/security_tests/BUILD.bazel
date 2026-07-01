@@ -5,7 +5,6 @@ load("@rules_cc//cc:defs.bzl", "cc_test")
 cc_test(
     name = "security_tests",
     srcs = glob(["*.cpp"]),
-    copts = ["-std=c++20"],
     # Tests load JSON policy data from test/common/examples_policies via
     # common::utility::get_policies_path(); make sure those files are
     # present in the runfiles tree.

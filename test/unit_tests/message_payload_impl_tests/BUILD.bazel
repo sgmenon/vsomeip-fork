@@ -5,7 +5,6 @@ load("@rules_cc//cc:defs.bzl", "cc_test")
 cc_test(
     name = "message_payload_impl_tests",
     srcs = glob(["*.cpp"]),
-    copts = ["-std=c++20"],
     deps = [
         "//:vsomeip-cfg",
         "//:vsomeip-lib",
