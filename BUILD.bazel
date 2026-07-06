@@ -201,6 +201,13 @@ VSOMEIP_CORE_MESSAGE_SRCS = [
     "implementation/message/src/deserializer.cpp",
     "implementation/message/src/message_base_impl.cpp",
     "implementation/message/src/message_header_impl.cpp",
+    # `message_impl.cpp` still calls `runtime::get()->create_payload()` in its
+    # ctor. That resolves inside core because `runtime_impl`'s payload/message
+    # factory methods live in `VSOMEIP_CORE_RUNTIME_SRCS` below. The only
+    # runtime methods `runtime_impl` cannot answer from core are the
+    # application-related ones, and those go through the
+    # `internal::application_factory` bridge installed by the routing layer.
+    "implementation/message/src/message_impl.cpp",
     "implementation/message/src/payload_impl.cpp",
     "implementation/message/src/serializer.cpp",
 ]
@@ -278,11 +285,37 @@ VSOMEIP_CORE_UTILITY_SRCS = [
 # `shared_ptr<>` by the SD `host` callback surface. They live in
 # `implementation/routing/src/` for historical reasons but have no
 # routing-manager dependency, so they belong in core.
+#
+# `event.cpp` includes its constructor. That constructor calls
+# `runtime::get()->create_notification()`, and `runtime_impl`'s
+# `create_notification` lives in `VSOMEIP_CORE_RUNTIME_SRCS` below — so it
+# resolves inside core without pulling in the routing manager.
 VSOMEIP_CORE_ROUTING_DATA_SRCS = [
     "implementation/routing/src/event.cpp",
     "implementation/routing/src/eventgroupinfo.cpp",
     "implementation/routing/src/remote_subscription.cpp",
     "implementation/routing/src/serviceinfo.cpp",
+]
+
+# The `runtime`/`runtime_impl` singleton plus its message and payload
+# factories. These live in core so that `libvsomeip3-core.so` is a
+# self-contained SOME/IP framing library — anything above the wire that
+# needs `runtime::get()->create_payload()` / `create_notification()` /
+# `create_message()` (e.g. `message_impl::message_impl`, `event::event`)
+# resolves inside core.
+#
+# The application-related methods on `runtime_impl` (create_application /
+# get_application / remove_application) also have their vtable slots
+# defined here, but their bodies forward through
+# `internal::application_factory` — an interface whose implementation is
+# provided by `runtime_impl_apps.cpp` in the routing layer, and installed
+# into core at library-load time. An SD-only host that never links
+# libvsomeip3.so has no factory installed, and calling create_application
+# throws std::logic_error. See
+# `implementation/runtime/include/application_factory.hpp`.
+VSOMEIP_CORE_RUNTIME_SRCS = [
+    "implementation/runtime/src/runtime.cpp",
+    "implementation/runtime/src/runtime_impl.cpp",
 ]
 
 VSOMEIP_CORE_SRCS = (
@@ -294,7 +327,8 @@ VSOMEIP_CORE_SRCS = (
     VSOMEIP_CORE_SECURITY_SRCS +
     VSOMEIP_CORE_TRACING_SRCS +
     VSOMEIP_CORE_UTILITY_SRCS +
-    VSOMEIP_CORE_ROUTING_DATA_SRCS
+    VSOMEIP_CORE_ROUTING_DATA_SRCS +
+    VSOMEIP_CORE_RUNTIME_SRCS
 )
 
 # -----------------------------------------------------------------------------
@@ -323,10 +357,15 @@ VSOMEIP_ROUTING_LAYER_ROUTING_SRCS = [
     "implementation/routing/src/routing_manager_stub.cpp",
 ]
 
+# Only the application half of runtime_impl lives in the routing layer.
+# `runtime_impl_apps.cpp` provides an `application_factory` implementation
+# (owning the applications registry and constructing `application_impl`s)
+# and a namespace-scope registrar that installs it into core's runtime_impl
+# at library load. See `VSOMEIP_CORE_RUNTIME_SRCS` above and
+# `implementation/runtime/include/application_factory.hpp`.
 VSOMEIP_ROUTING_LAYER_RUNTIME_SRCS = [
     "implementation/runtime/src/application_impl.cpp",
-    "implementation/runtime/src/runtime.cpp",
-    "implementation/runtime/src/runtime_impl.cpp",
+    "implementation/runtime/src/runtime_impl_apps.cpp",
 ]
 
 # `timer.cpp` wraps `boost::asio::steady_timer` behind
@@ -340,26 +379,11 @@ VSOMEIP_ROUTING_LAYER_TIMER_SRCS = [
     "implementation/endpoints/src/timer.cpp",
 ]
 
-# `message_impl` is the SOME/IP message implementation. SD has its own
-# `vsomeip_v3::sd::message_impl` (in `implementation/service_discovery/`)
-# and never instantiates the core one, so moving `message_impl.cpp` out
-# of core leaves `libvsomeip3-core.so` free of `message_impl::*` symbols
-# (and the `runtime::get()->create_payload()` call its ctor would
-# otherwise contribute to core's undefined-symbol table).
-# `deserializer_message.cpp` carries the lone `deserializer::deserialize_message()`
-# method body — the only place in `deserializer.cpp` that referenced
-# `message_impl` — so the primitive `deserializer` used by SD stays in core.
-VSOMEIP_ROUTING_LAYER_MESSAGE_SRCS = [
-    "implementation/message/src/deserializer_message.cpp",
-    "implementation/message/src/message_impl.cpp",
-]
-
 VSOMEIP_ROUTING_LAYER_SRCS = (
     VSOMEIP_ROUTING_LAYER_ENDPOINTS_SRCS +
     VSOMEIP_ROUTING_LAYER_ROUTING_SRCS +
     VSOMEIP_ROUTING_LAYER_RUNTIME_SRCS +
-    VSOMEIP_ROUTING_LAYER_TIMER_SRCS +
-    VSOMEIP_ROUTING_LAYER_MESSAGE_SRCS
+    VSOMEIP_ROUTING_LAYER_TIMER_SRCS
 )
 
 # =============================================================================

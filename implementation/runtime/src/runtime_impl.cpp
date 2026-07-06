@@ -3,11 +3,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+#include <atomic>
+#include <memory>
+#include <stdexcept>
+#include <utility>
+
+#include <vsomeip/constants.hpp>
 #include <vsomeip/defines.hpp>
 
-#include <boost/asio/io_context.hpp>
-
-#include "../include/application_impl.hpp"
 #include "../include/runtime_impl.hpp"
 #include "../../message/include/message_impl.hpp"
 #include "../../message/include/payload_impl.hpp"
@@ -32,42 +35,72 @@ std::shared_ptr<runtime> runtime_impl::get() {
     return the_runtime_;
 }
 
-std::shared_ptr<application> runtime_impl::create_application(const std::string& _name) {
+// Application-factory slot: installed by the routing layer's registrar (see
+// runtime_impl_apps.cpp) at library load; read below by create_application /
+// get_application / remove_application. `shared_ptr` (not `unique_ptr`) so a
+// concurrent set replacing the slot cannot free the factory out from under
+// an in-flight get. Accessed via C++17's atomic-on-shared_ptr free
+// functions to keep the read path lock-free; swap for
+// `std::atomic<std::shared_ptr<T>>` when this codebase moves to C++20.
+namespace {
 
+std::shared_ptr<internal::application_factory>& factory_slot() {
+    // Function-local static: constructed on first use, ahead of any pre-main
+    // registrar that might reach it.
+    static std::shared_ptr<internal::application_factory> instance;
+    return instance;
+}
+
+[[noreturn]] void throw_no_factory(const char* _method) {
+    throw std::logic_error(std::string("vsomeip: ") + _method
+                           + " called but no application_factory has been"
+                             " registered — this build is missing the routing"
+                             " layer (libvsomeip3.so). See runtime_impl_apps.cpp.");
+}
+
+} // namespace
+
+void runtime_impl::set_application_factory(std::shared_ptr<internal::application_factory> _factory) {
+    std::atomic_store_explicit(&factory_slot(), std::move(_factory), std::memory_order_release);
+}
+
+std::shared_ptr<internal::application_factory> runtime_impl::get_application_factory() {
+    return std::atomic_load_explicit(&factory_slot(), std::memory_order_acquire);
+}
+
+std::shared_ptr<application> runtime_impl::create_application(const std::string& _name) {
     return create_application(_name, "");
 }
 
 std::shared_ptr<application> runtime_impl::create_application(const std::string& _name, const std::string& _path) {
-    std::scoped_lock its_lock{applications_mutex_};
-    static std::uint32_t postfix_id = 0;
-    std::string its_name = _name;
-    auto found_application = applications_.find(_name);
-    if (found_application != applications_.end()) {
-        its_name += "_" + std::to_string(postfix_id++);
-    }
-    std::shared_ptr<application> application = std::make_shared<application_impl>(its_name, _path);
-    applications_[its_name] = application;
-    return application;
+    auto factory = get_application_factory();
+    if (!factory)
+        throw_no_factory("runtime::create_application");
+    return factory->create(_name, _path);
 }
 
-std::shared_ptr<application> runtime_impl::create_application(
-        const std::string& _name, const std::string& _path, boost::asio::io_context& _io) {
-    std::scoped_lock its_lock{applications_mutex_};
-    static std::uint32_t postfix_id = 0;
-    std::string its_name = _name;
-    auto found_application = applications_.find(_name);
-    if (found_application != applications_.end()) {
-        its_name += "_" + std::to_string(postfix_id++);
-    }
-    std::shared_ptr<application> application = std::make_shared<application_impl>(its_name, _path, _io);
-    applications_[its_name] = application;
-    return application;
+std::shared_ptr<application> runtime_impl::create_application(const std::string& _name, const std::string& _path,
+                                                              boost::asio::io_context& _io) {
+    auto factory = get_application_factory();
+    if (!factory)
+        throw_no_factory("runtime::create_application");
+    return factory->create_with_io(_name, _path, _io);
 }
 
-std::shared_ptr<application> create_application_with_external_io(
-        const std::string& _name, boost::asio::io_context& _io) {
-    return std::dynamic_pointer_cast<runtime_impl>(runtime::get())->create_application(_name, "", _io);
+std::shared_ptr<application> runtime_impl::get_application(const std::string& _name) const {
+    // No factory installed = SD-only host, no apps to find. Match the
+    // "unknown name" contract by returning nullptr rather than throwing.
+    auto factory = get_application_factory();
+    if (!factory)
+        return nullptr;
+    return factory->get(_name);
 }
+
+void runtime_impl::remove_application(const std::string& _name) {
+    if (auto factory = get_application_factory())
+        factory->remove(_name);
+}
+
 
 std::shared_ptr<message> runtime_impl::create_message(bool _reliable) const {
     auto its_message = std::make_shared<message_impl>();
@@ -122,22 +155,6 @@ std::shared_ptr<payload> runtime_impl::create_payload(const byte_t* _data, uint3
 
 std::shared_ptr<payload> runtime_impl::create_payload(const std::vector<byte_t>& _data) const {
     return std::make_shared<payload_impl>(_data);
-}
-
-std::shared_ptr<application> runtime_impl::get_application(const std::string& _name) const {
-    std::scoped_lock its_lock{applications_mutex_};
-    auto found_application = applications_.find(_name);
-    if (found_application != applications_.end())
-        return found_application->second.lock();
-    return nullptr;
-}
-
-void runtime_impl::remove_application(const std::string& _name) {
-    std::scoped_lock its_lock{applications_mutex_};
-    auto found_application = applications_.find(_name);
-    if (found_application != applications_.end()) {
-        applications_.erase(_name);
-    }
 }
 
 } // namespace vsomeip_v3

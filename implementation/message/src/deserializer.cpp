@@ -4,6 +4,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <cstring>
+#include <exception>
+#include <memory>
 
 #ifdef VSOMEIP_DEBUGGING
 #include <iomanip>
@@ -12,6 +14,7 @@
 #include <vsomeip/internal/logger.hpp>
 
 #include "../include/deserializer.hpp"
+#include "../include/message_impl.hpp"
 #include "../../utility/include/bithelper.hpp"
 
 namespace vsomeip_v3 {
@@ -148,9 +151,18 @@ bool deserializer::look_ahead(std::size_t _index, uint32_t& _value) const {
     return true;
 }
 
-// `deserialize_message()` lives in `deserializer_message.cpp` so that the
-// primitive `deserializer` used by SD does not pull `message_impl` into
-// `libvsomeip3-core.so`.
+std::unique_ptr<message_impl> deserializer::deserialize_message() try {
+    auto deserialized_message = std::make_unique<message_impl>();
+    if (!deserialized_message->deserialize(this)) {
+        VSOMEIP_ERROR << "SOME/IP message deserialization failed!";
+        return nullptr;
+    }
+
+    return deserialized_message;
+} catch (const std::exception& e) {
+    VSOMEIP_ERROR << "SOME/IP message deserialization failed with exception: " << e.what();
+    return nullptr;
+}
 
 void deserializer::set_data(const byte_t* _data, std::size_t _length) {
     if (0 != _data) {

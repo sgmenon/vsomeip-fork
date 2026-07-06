@@ -1,0 +1,15 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "runtime_impl_tests",
+    srcs = glob(["*.cpp"]),
+    # Depends on vsomeip-lib (not just vsomeip-core) so the routing-layer
+    # factory registrar runs at library load and these tests can override the slot.
+    deps = [
+        "//:vsomeip-lib",
+        "//test/unit_tests:test_main",
+        "@googletest//:gtest",
+    ],
+)
