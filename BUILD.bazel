@@ -703,7 +703,7 @@ cc_library(
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    deps = [":vsomeip-lib"],
+    deps = [":vsomeip-core"],
 )
 
 cc_shared_library(

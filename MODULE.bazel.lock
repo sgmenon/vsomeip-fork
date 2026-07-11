@@ -365,7 +365,7 @@
     "@@bazel-toolchains+//gcc_toolchain:toolchain_extension.bzl%gcc_toolchain_extension": {
       "general": {
         "bzlTransitiveDigest": "SD3Ychh6446qwqYpuxFpryno8QQ8A8Yzte5Uig0/wVM=",
-        "usagesDigest": "TE9ksbqbRnvaLEgTvrd2scFdt5I+4DtIUZh7Q3aHyEU=",
+        "usagesDigest": "v+x0kPZAE7A13d+XNKILbqrSYgqbqVs1hi0G2MNVG1o=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
