@@ -2476,10 +2476,17 @@ void routing_manager_impl::init_routing_info() {
         boost::asio::ip::address its_address(boost::asio::ip::make_address(configuration_->get_unicast_address(i.first, i.second)));
         uint16_t its_reliable_port = configuration_->get_reliable_port(i.first, i.second);
         uint16_t its_unreliable_port = configuration_->get_unreliable_port(i.first, i.second);
+        // Historically this passed DEFAULT_MAJOR / DEFAULT_MINOR, which caused
+        // `is_remotely_available` to reject any send whose message carried a
+        // non-zero `interface_version`. Read the configured major/minor from
+        // the JSON `services[]` entry so the routing_info_ table matches the
+        // version the peer actually offers.
+        major_version_t its_major = configuration_->get_major_version(i.first, i.second);
+        minor_version_t its_minor = configuration_->get_minor_version(i.first, i.second);
 
         if (its_reliable_port != ILLEGAL_PORT || its_unreliable_port != ILLEGAL_PORT) {
 
-            add_routing_info(i.first, i.second, DEFAULT_MAJOR, DEFAULT_MINOR, DEFAULT_TTL, its_address, its_reliable_port, its_address,
+            add_routing_info(i.first, i.second, its_major, its_minor, DEFAULT_TTL, its_address, its_reliable_port, its_address,
                              its_unreliable_port);
 
             if (its_reliable_port != ILLEGAL_PORT) {

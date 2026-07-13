@@ -8,6 +8,7 @@
 
 #include <memory>
 
+#include <vsomeip/constants.hpp>
 #include <vsomeip/primitive_types.hpp>
 
 namespace vsomeip_v3 {
@@ -19,6 +20,9 @@ struct eventgroup;
 struct service {
     service_t service_;
     instance_t instance_;
+
+    major_version_t major_ {DEFAULT_MAJOR};
+    minor_version_t minor_ {DEFAULT_MINOR};
 
     std::string unicast_address_;
 

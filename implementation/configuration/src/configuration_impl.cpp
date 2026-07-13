@@ -1955,6 +1955,12 @@ void configuration_impl::load_service(const boost::property_tree::ptree& _tree, 
                     its_converter >> its_service->service_;
                 } else if (its_key == "instance") {
                     its_converter >> its_service->instance_;
+                } else if (its_key == "major") {
+                    unsigned int tmp_major = 0;
+                    its_converter >> tmp_major;
+                    its_service->major_ = static_cast<major_version_t>(tmp_major);
+                } else if (its_key == "minor") {
+                    its_converter >> its_service->minor_;
                 }
             }
         }
@@ -3085,6 +3091,18 @@ std::set<std::pair<service_t, instance_t>> configuration_impl::get_remote_servic
         }
     }
     return its_remote_services;
+}
+
+major_version_t configuration_impl::get_major_version(service_t _service, instance_t _instance) const {
+    std::lock_guard<std::mutex> its_lock(services_mutex_);
+    auto its_service = find_service_unlocked(_service, _instance);
+    return its_service ? its_service->major_ : DEFAULT_MAJOR;
+}
+
+minor_version_t configuration_impl::get_minor_version(service_t _service, instance_t _instance) const {
+    std::lock_guard<std::mutex> its_lock(services_mutex_);
+    auto its_service = find_service_unlocked(_service, _instance);
+    return its_service ? its_service->minor_ : DEFAULT_MINOR;
 }
 
 bool configuration_impl::is_mandatory(const std::string& _name) const {
