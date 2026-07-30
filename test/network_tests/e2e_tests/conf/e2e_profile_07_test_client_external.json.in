@@ -27,7 +27,7 @@
                 "event_id" : "0x0001",
                 "profile" : "P07",
                 "variant" : "checker",
-                "crc_offset" : "64",
+                "crc_offset" : "0",
                 "data_id" : "0x2d"
             },
             {
@@ -35,7 +35,7 @@
                 "event_id" : "0x8001",
                 "profile" : "P07",
                 "variant" : "checker",
-                "crc_offset" : "64",
+                "crc_offset" : "0",
                 "data_id" : "0x2d"
             }
         ]

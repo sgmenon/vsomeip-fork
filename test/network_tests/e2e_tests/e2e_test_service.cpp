@@ -56,9 +56,10 @@ bool e2e_test_service::init() {
     // set value to field which gets filled by e2e protection  with CRC on sending
     // after e2e protection the payload for first event should look like:
     // {{0xa4, 0xa1, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff}
+    // App sends hole-free user data only; E2E header bytes are owned by the plugin.
     std::shared_ptr<vsomeip::payload> its_payload = vsomeip::runtime::get()->create_payload();
-    vsomeip::byte_t its_data[8] = {0x00, 0x00, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff};
-    its_payload->set_data(its_data, 8);
+    vsomeip::byte_t its_data[6] = {0x00, 0xff, 0xff, 0xff, 0xff, 0xff};
+    its_payload->set_data(its_data, 6);
 
     app_->notify(vsomeip_test::TEST_SERVICE_SERVICE_ID, vsomeip_test::TEST_SERVICE_INSTANCE_ID, static_cast<vsomeip::event_t>(0x8001),
                  its_payload);
@@ -72,8 +73,8 @@ bool e2e_test_service::init() {
     // after e2e protection the payload for first event should look like:
     // {{0x89, 0x0e, 0xbc, 0x80, 0xff, 0xff, 0x00, 0x32}
     std::shared_ptr<vsomeip::payload> its_payload_8002 = vsomeip::runtime::get()->create_payload();
-    vsomeip::byte_t its_data_8002[8] = {0x00, 0x00, 0x00, 0x00, 0xff, 0xff, 0x00, 0x32};
-    its_payload_8002->set_data(its_data_8002, 8);
+    vsomeip::byte_t its_data_8002[4] = {0xff, 0xff, 0x00, 0x32};
+    its_payload_8002->set_data(its_data_8002, 4);
 
     app_->notify(vsomeip_test::TEST_SERVICE_SERVICE_ID, vsomeip_test::TEST_SERVICE_INSTANCE_ID, static_cast<vsomeip::event_t>(0x8002),
                  its_payload_8002);
@@ -142,9 +143,9 @@ void e2e_test_service::on_message(const std::shared_ptr<vsomeip::message>& _requ
         app_->send(its_response);
 
         // set value to field which gets filled by e2e protection with CRC on sending
-        vsomeip::byte_t its_data[8] = {
-                0x00, 0x00, (uint8_t)received_requests_counters_[vsomeip_test::TEST_SERVICE_METHOD_ID], 0xff, 0xff, 0xff, 0xff, 0xff};
-        its_event_payload->set_data(its_data, 8);
+        vsomeip::byte_t its_data[6] = {
+                (uint8_t)received_requests_counters_[vsomeip_test::TEST_SERVICE_METHOD_ID], 0xff, 0xff, 0xff, 0xff, 0xff};
+        its_event_payload->set_data(its_data, 6);
         app_->notify(vsomeip_test::TEST_SERVICE_SERVICE_ID, vsomeip_test::TEST_SERVICE_INSTANCE_ID, static_cast<vsomeip::event_t>(0x8001),
                      its_event_payload);
         received_requests_counters_[vsomeip_test::TEST_SERVICE_METHOD_ID]++;
@@ -156,8 +157,8 @@ void e2e_test_service::on_message(const std::shared_ptr<vsomeip::message>& _requ
         app_->send(its_response);
 
         // set value to field which gets filled by e2e protection with 4 byte CRC 32 on sending
-        vsomeip::byte_t its_data[8] = {0x00, 0x00, 0x00, 0x00, 0xff, 0xff, (uint8_t)received_requests_counters_[0x6543], 0x32};
-        its_event_payload->set_data(its_data, 8);
+        vsomeip::byte_t its_data[4] = {0xff, 0xff, (uint8_t)received_requests_counters_[0x6543], 0x32};
+        its_event_payload->set_data(its_data, 4);
         app_->notify(vsomeip_test::TEST_SERVICE_SERVICE_ID, vsomeip_test::TEST_SERVICE_INSTANCE_ID, static_cast<vsomeip::event_t>(0x8002),
                      its_event_payload);
         received_requests_counters_[0x6543]++;
