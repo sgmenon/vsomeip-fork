@@ -1,0 +1,54 @@
+# Bazel-built event_test over Docker Compose (Cruise-style).
+#
+# Master (172.29.0.2) runs the client; slave (172.29.0.3) offers the service.
+# Binaries are staged into ${PKG_DIR}/app by setup.sh after a host `bazel build`.
+
+services:
+  slave:
+    build: ${PKG_DIR}/docker_infra
+    image: vsomeip-network-test:latest
+    container_name: vsomeip-event-test-slave
+    cap_add:
+      - NET_ADMIN
+    networks:
+      vsomeip-net:
+        ipv4_address: 172.29.0.3
+    volumes:
+      - ${PKG_DIR}/app:/app
+      - ${PKG_DIR}/configs:/app/configs:ro
+    command: ["/app/run-slave.sh"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/slave-ready"]
+      interval: 1s
+      timeout: 1s
+      retries: 60
+      start_period: 2s
+
+  master:
+    build: ${PKG_DIR}/docker_infra
+    image: vsomeip-network-test:latest
+    container_name: vsomeip-event-test-master
+    cap_add:
+      - NET_ADMIN
+    networks:
+      vsomeip-net:
+        ipv4_address: 172.29.0.2
+    volumes:
+      - ${PKG_DIR}/app:/app
+      - ${PKG_DIR}/configs:/app/configs:ro
+    environment:
+      TESTMODE: ${TESTMODE:-PAYLOAD_FIXED}
+      COMMUNICATIONMODE: ${COMMUNICATIONMODE:-UDP}
+    command: ["/app/run-master.sh"]
+    depends_on:
+      slave:
+        condition: service_healthy
+
+networks:
+  vsomeip-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+    driver_opts:
+      com.docker.network.bridge.name: "vsomeip-evt-br0"

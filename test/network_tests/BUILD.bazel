@@ -1,0 +1,24 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# Network / integration tests for vsomeip.
+#
+# In-process / unit-style suites (run via `bazel test`):
+#   //test/network_tests/fake_socket_tests:fake_socket_tests
+#   //test/network_tests/header_factory_tests:header_factory_test
+#   //test/network_tests/configuration_tests:configuration_test
+#
+# Multi-host suites are NOT `bazel test` targets. Build on the host, then
+# run via Docker Compose:
+#   test/network_tests/docker_tests/run-test.sh event_test
+
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
+package(default_visibility = ["//test:__subpackages__"])
+
+cc_library(
+    name = "someip_test_globals",
+    testonly = True,
+    hdrs = ["someip_test_globals.hpp"],
+    includes = ["."],
+    deps = ["//:vsomeip-lib"],
+)
