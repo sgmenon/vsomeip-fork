@@ -9,6 +9,7 @@
 #include <vsomeip/primitive_types.hpp>
 
 #include "../../../buffer/buffer.hpp"
+#include "../protect_result.hpp"
 #include "../profile_interface/profile_interface.hpp"
 
 namespace vsomeip_v3 {
@@ -17,7 +18,11 @@ namespace profile_interface {
 
 class protector : public profile_interface {
 public:
-    virtual void protect(e2e_buffer& _buffer, instance_t _instance) = 0;
+    /**
+     * Protect hole-free app payload. Returns E2E header (+ optional contiguous
+     * fallback) without requiring the caller to pre-allocate in-band holes.
+     */
+    virtual protect_result protect_parts(buffer_view _app_payload, instance_t _instance) = 0;
 };
 
 } // namespace profile_interface

@@ -111,11 +111,12 @@ std::size_t e2e_provider_impl::get_protection_base(e2exf::data_identifier_t id) 
     return 0;
 }
 
-void e2e_provider_impl::protect(e2exf::data_identifier_t id, e2e_buffer& _buffer, instance_t _instance) {
+protect_result e2e_provider_impl::protect_parts(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) {
     auto protector = custom_protectors_.find(id);
     if (protector != custom_protectors_.end()) {
-        protector->second->protect(_buffer, _instance);
+        return protector->second->protect_parts(app_payload, instance);
     }
+    return protect_result{};
 }
 
 void e2e_provider_impl::check(e2exf::data_identifier_t id, const e2e_buffer& _buffer, instance_t _instance,
@@ -124,6 +125,22 @@ void e2e_provider_impl::check(e2exf::data_identifier_t id, const e2e_buffer& _bu
     if (checker != custom_checkers_.end()) {
         checker->second->check(_buffer, _instance, _generic_check_status);
     }
+}
+
+bool e2e_provider_impl::get_unprotected_payload(e2exf::data_identifier_t id, buffer_view _protected_area,
+                                                span<const uint8_t>& _out) const {
+    const auto found = custom_payload_starts_.find(id);
+    if (found == custom_payload_starts_.end()) {
+        return false;
+    }
+
+    const std::size_t its_start = found->second;
+    if (_protected_area.data_length() < its_start) {
+        return false;
+    }
+
+    _out = span<const uint8_t>(_protected_area.begin() + its_start, _protected_area.data_length() - its_start);
+    return true;
 }
 
 template<>

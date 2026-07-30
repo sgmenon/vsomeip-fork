@@ -62,9 +62,106 @@
 #include "../../e2e_protection/include/e2exf/config.hpp"
 
 #include "../../e2e_protection/include/e2e/profile/e2e_provider.hpp"
+#include "../../endpoints/include/buffer.hpp"
+#include <vsomeip/span.hpp>
 #endif
 
 namespace vsomeip_v3 {
+
+#ifndef ANDROID
+namespace {
+
+send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<e2e::e2e_provider>& _provider, const byte_t* _data,
+                                                          uint32_t _size, instance_t _instance) {
+    if (!_provider || !_data || _size < VSOMEIP_SOMEIP_HEADER_SIZE) {
+        return nullptr;
+    }
+
+    const service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
+    const method_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
+    if (!_provider->is_protected({its_service, its_method})) {
+        return nullptr;
+    }
+
+    const size_t its_base = _provider->get_protection_base({its_service, its_method});
+    if (its_base > _size) {
+        return nullptr;
+    }
+
+    const buffer_view its_app_payload(_data + its_base, _size - its_base);
+    e2e::protect_result its_parts = _provider->protect_parts({its_service, its_method}, its_app_payload, _instance);
+    if (!its_parts.valid) {
+        return nullptr;
+    }
+
+    auto its_header = std::make_shared<message_buffer_t>(_data, _data + its_base);
+    const uint32_t its_new_total = static_cast<uint32_t>(its_base + its_parts.size());
+    if (its_header->size() >= VSOMEIP_LENGTH_POS_MAX + 1) {
+        bithelper::write_uint32_be(its_new_total - 8U, its_header->data() + VSOMEIP_LENGTH_POS_MIN);
+    }
+
+    auto its_sequence = std::make_shared<send_buffer_sequence>();
+    its_sequence->append(its_header);
+
+    // Move ownership — e2e_buffer is vector<uint8_t> == message_buffer_t.
+    auto append_e2e_buf = [&](std::shared_ptr<e2e_buffer>& _buf) {
+        if (_buf && !_buf->empty()) {
+            its_sequence->append(std::move(_buf));
+        }
+    };
+
+    if (its_parts.contiguous) {
+        append_e2e_buf(its_parts.contiguous);
+    } else {
+        append_e2e_buf(its_parts.leading_gap);
+        append_e2e_buf(its_parts.e2e_header);
+        append_e2e_buf(its_parts.app_payload);
+    }
+
+    return its_sequence;
+}
+
+/**
+ * After a successful (or attempted) check, rebuild the message with E2E framing
+ * removed so the application sees a hole-free payload. Returns nullptr if the
+ * message is not E2E-checked or stripping is not possible.
+ */
+message_buffer_ptr_t strip_e2e_protected_payload(const std::shared_ptr<e2e::e2e_provider>& _provider, const byte_t* _data, uint32_t _size) {
+    if (!_provider || !_data || _size < VSOMEIP_SOMEIP_HEADER_SIZE) {
+        return nullptr;
+    }
+
+    const service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
+    const method_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
+    if (!_provider->is_checked({its_service, its_method})) {
+        return nullptr;
+    }
+
+    const size_t its_base = _provider->get_protection_base({its_service, its_method});
+    if (its_base > _size) {
+        return nullptr;
+    }
+
+    const buffer_view its_protected(_data + its_base, _size - its_base);
+    span<const uint8_t> its_app;
+    if (!_provider->get_unprotected_payload({its_service, its_method}, its_protected, its_app)) {
+        return nullptr;
+    }
+
+    auto its_out = std::make_shared<message_buffer_t>();
+    its_out->reserve(its_base + its_app.size());
+    its_out->insert(its_out->end(), _data, _data + its_base);
+    its_out->insert(its_out->end(), its_app.begin(), its_app.end());
+
+    const uint32_t its_new_total = static_cast<uint32_t>(its_out->size());
+    if (its_out->size() >= VSOMEIP_LENGTH_POS_MAX + 1) {
+        bithelper::write_uint32_be(its_new_total - 8U, its_out->data() + VSOMEIP_LENGTH_POS_MIN);
+    }
+    return its_out;
+}
+
+} // namespace
+#endif
 
 #ifdef ANDROID
 namespace sd {
@@ -836,45 +933,36 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                 // TODO: Find out how to handle session id here
                 is_sent = deliver_message(_data, _size, _instance, _reliable, VSOMEIP_ROUTING_CLIENT, _sec_client, _status_check);
             } else {
-                e2e_buffer its_buffer;
+                send_buffer_sequence_ptr_t its_e2e_sequence;
+                const byte_t* its_send_data = _data;
+                uint32_t its_send_size = _size;
+                message_buffer_ptr_t its_trace_flat;
 
                 if (e2e_provider_) {
-                // GM - Begin
-                    //if ( !is_service_discovery) {
-                    if ( is_service_discovery) {
+                    // GM - Begin
+                    if (is_service_discovery) {
                         VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting SD message ..";
                     } else {
                         VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting non-SD message ..";
                     }
-                        service_t its_service_inner = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-                        method_t its_method_inner = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
 #ifndef ANDROID
-                        if (e2e_provider_->is_protected({its_service_inner, its_method_inner})) {
-                            // Find out where the protected area starts
-                            size_t its_base = e2e_provider_->get_protection_base({its_service_inner, its_method_inner});
-
-                            // Build a corresponding buffer
-                            its_buffer.assign(_data + its_base, _data + _size);
-
-                            e2e_provider_->protect({its_service_inner, its_method_inner}, its_buffer, _instance);
-
-                            // Prepend header
-                            its_buffer.insert(its_buffer.begin(), _data, _data + its_base);
-
-                            _data = its_buffer.data();
-                        }
+                    its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, _instance);
+                    if (its_e2e_sequence) {
+                        its_send_size = static_cast<uint32_t>(its_e2e_sequence->size());
+                        its_trace_flat = its_e2e_sequence->flatten();
+                        its_send_data = its_trace_flat->data();
+                    }
 #endif
-                    //}
-                // GM - End
+                    // GM - End
                 }
                 if (is_request) {
                     its_target = ep_mgr_impl_->find_or_create_remote_client(its_service, _instance, _reliable);
                     if (its_target) {
-                        is_sent = its_target->send(_data, _size);
+                        is_sent = its_e2e_sequence ? its_target->send(its_e2e_sequence) : its_target->send(_data, _size);
                         if (is_sent) {
                             trace::header its_header;
                             if (its_header.prepare(its_target, true, _instance))
-                                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+                                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
                         }
                     } else {
                         const session_t its_session = bithelper::read_uint16_be(&_data[VSOMEIP_SESSION_POS_MIN]);
@@ -886,8 +974,8 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                     std::shared_ptr<serviceinfo> its_info(find_service(its_service, _instance));
                     if (its_info || is_service_discovery) {
                         if (is_notification && !is_service_discovery) {
-                            static_cast<void>(
-                                    send_local_notification(get_client(), _data, _size, _instance, _reliable, _status_check, _force));
+                            static_cast<void>(send_local_notification(get_client(), its_send_data, its_send_size, _instance, _reliable,
+                                                                      _status_check, _force));
                             method_t its_method_inner = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
                             std::shared_ptr<event> its_event = find_event(its_service, _instance, its_method_inner);
                             if (its_event) {
@@ -938,16 +1026,24 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
 
                                 for (auto const& target : its_targets) {
                                     if (target->is_reliable()) {
-                                        its_tcp_server_endpoint->send_to(target, _data, _size);
+                                        if (its_e2e_sequence) {
+                                            its_tcp_server_endpoint->send_to(target, its_e2e_sequence);
+                                        } else {
+                                            its_tcp_server_endpoint->send_to(target, _data, _size);
+                                        }
                                     } else {
-                                        its_udp_server_endpoint->send_to(target, _data, _size);
+                                        if (its_e2e_sequence) {
+                                            its_udp_server_endpoint->send_to(target, its_e2e_sequence);
+                                        } else {
+                                            its_udp_server_endpoint->send_to(target, _data, _size);
+                                        }
                                     }
                                     has_sent = true;
                                 }
                                 if (has_sent) {
                                     trace::header its_header;
                                     if (its_header.prepare(nullptr, true, _instance))
-                                        tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+                                        tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
                                 }
                             }
                         } else {
@@ -968,11 +1064,11 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                             its_target = is_service_discovery ? (sd_info_ ? sd_info_->get_endpoint(false) : nullptr)
                                                               : its_info->get_endpoint(_reliable);
                             if (its_target) {
-                                is_sent = its_target->send(_data, _size);
+                                is_sent = its_e2e_sequence ? its_target->send(its_e2e_sequence) : its_target->send(_data, _size);
                                 if (is_sent) {
                                     trace::header its_header;
                                     if (its_header.prepare(its_target, true, _instance))
-                                        tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+                                        tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
                                 }
                             } else {
                                 const session_t its_session = bithelper::read_uint16_be(&_data[VSOMEIP_SESSION_POS_MIN]);
@@ -1008,20 +1104,20 @@ bool routing_manager_impl::send_to(const client_t _client, const std::shared_ptr
     if (its_serializer->serialize(_message.get())) {
         const byte_t* its_data = its_serializer->get_data();
         length_t its_size = its_serializer->get_size();
-        e2e_buffer its_buffer;
-        if (e2e_provider_) {
-            service_t its_service = bithelper::read_uint16_be(&its_data[VSOMEIP_SERVICE_POS_MIN]);
-            method_t its_method = bithelper::read_uint16_be(&its_data[VSOMEIP_METHOD_POS_MIN]);
+        message_buffer_ptr_t its_protected;
 #ifndef ANDROID
-            if (e2e_provider_->is_protected({its_service, its_method})) {
-                auto its_base = e2e_provider_->get_protection_base({its_service, its_method});
-                its_buffer.assign(its_data + its_base, its_data + its_size);
-                e2e_provider_->protect({its_service, its_method}, its_buffer, _message->get_instance());
-                its_buffer.insert(its_buffer.begin(), its_data, its_data + its_base);
-                its_data = its_buffer.data();
+        if (e2e_provider_) {
+            auto its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, its_data, its_size, _message->get_instance());
+            if (its_e2e_sequence) {
+                // TODO(tech-debt #3): flatten only to mutate client id in-place, then send contiguous.
+                // Prefer writing client into the SOME/IP header buffer before compose, or a
+                // sequence-aware patch, so the E2E sequence can be sent without flattening.
+                its_protected = its_e2e_sequence->flatten();
+                its_data = its_protected->data();
+                its_size = static_cast<length_t>(its_protected->size());
             }
-#endif
         }
+#endif
 
         uint8_t its_client[2] = {0};
         bithelper::write_uint16_le(_client, its_client);
@@ -1059,25 +1155,20 @@ bool routing_manager_impl::send_via_sd(
         const byte_t *_data, uint32_t _size, uint16_t _sd_port) {
     // GM - Begin
     instance_t its_instance(0x0);
-    e2e_buffer its_buffer;
+    send_buffer_sequence_ptr_t its_e2e_sequence;
+    message_buffer_ptr_t its_flat;
+    const byte_t* its_send_data = _data;
+    uint32_t its_send_size = _size;
 
     if (e2e_provider_) {
         VSOMEIP_DEBUG << "routing_manager_impl::send_via_sd() >>>> e2e_provider enabled, protecting SD message ..";
-        service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-        method_t its_method   = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
 #ifndef ANDROID
-        // Find out where the protected area starts
-        size_t its_base = e2e_provider_->get_protection_base({its_service, its_method});
-
-        // Build a corresponding buffer
-        its_buffer.assign(_data + its_base, _data + _size);
-
-        e2e_provider_->protect({ its_service, its_method }, its_buffer, its_instance);
-
-        // Prepend header
-        its_buffer.insert(its_buffer.begin(), _data, _data + its_base);
-
-        _data = its_buffer.data();
+        its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, its_instance);
+        if (its_e2e_sequence) {
+            its_flat = its_e2e_sequence->flatten();
+            its_send_data = its_flat->data();
+            its_send_size = static_cast<uint32_t>(its_flat->size());
+        }
 #endif
     }
     // GM - End
@@ -1087,11 +1178,15 @@ bool routing_manager_impl::send_via_sd(
                     _target->is_reliable());
 
     if (its_endpoint) {
-        is_sent = its_endpoint->send_to(_target, _data, _size);
+        if (its_e2e_sequence) {
+            is_sent = its_endpoint->send_to(_target, its_e2e_sequence);
+        } else {
+            is_sent = its_endpoint->send_to(_target, _data, _size);
+        }
         if (is_sent && tc_->is_sd_enabled()) {
             trace::header its_header;
             if (its_header.prepare(its_endpoint, true, 0x0))
-                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
         }
     }
     return is_sent;
@@ -1417,6 +1512,9 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
                 }
             }
         }
+#ifndef ANDROID
+        message_buffer_ptr_t its_stripped;
+#endif
         if (e2e_provider_) {
 #ifndef ANDROID
             if (e2e_provider_->is_checked({its_service, its_method})) {
@@ -1427,6 +1525,12 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
                 if (its_check_status != e2e::profile_interface::generic_check_status::E2E_OK) {
                     VSOMEIP_INFO << "E2E protection: CRC check failed for service: " << std::hex << its_service
                                  << " method: " << its_method;
+                }
+
+                its_stripped = strip_e2e_protected_payload(e2e_provider_, _data, _size);
+                if (its_stripped) {
+                    _data = its_stripped->data();
+                    _size = static_cast<length_t>(its_stripped->size());
                 }
             }
 #endif
