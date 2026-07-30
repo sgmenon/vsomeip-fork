@@ -14,6 +14,7 @@
 #include <boost/asio/local/stream_protocol.hpp>
 #endif
 #include <functional>
+#include <memory>
 
 namespace vsomeip_v3 {
 
@@ -27,6 +28,8 @@ public:
     virtual std::unique_ptr<tcp_socket> create_tcp_socket(boost::asio::io_context& _io) = 0;
     virtual std::unique_ptr<tcp_acceptor> create_tcp_acceptor(boost::asio::io_context& _io) = 0;
 
+    // UDP send paths accept ConstBufferSequence; the factory still returns a raw asio
+    // socket because multicast / SO_RCVBUFFORCE options are used directly today.
     std::unique_ptr<boost::asio::ip::udp::socket> create_udp_socket(boost::asio::io_context& _io) {
         return std::make_unique<boost::asio::ip::udp::socket>(_io);
     }

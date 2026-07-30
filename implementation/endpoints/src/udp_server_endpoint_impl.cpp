@@ -366,6 +366,16 @@ bool udp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition
     return result;
 }
 
+bool udp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+    std::scoped_lock its_lock(mutex_);
+    bool result = false;
+    if (_target) {
+        endpoint_type its_target(_target->get_address(), _target->get_port());
+        result = send_intern(its_target, _sequence);
+    }
+    return result;
+}
+
 bool udp_server_endpoint_impl::send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
     // The `mutex_` lock must be hold when modifying the `targets_` list or
     // any field inside this list (`_target` points to this list).
@@ -377,7 +387,7 @@ bool udp_server_endpoint_impl::send_error(const std::shared_ptr<endpoint_definit
     bool can_be_send = check_queue_limit(_data, _size, its_data) && check_message_size(_size);
 
     if (can_be_send) {
-        its_data.queue_.emplace_back(std::make_shared<message_buffer_t>(_data, _data + _size), 0);
+        its_data.queue_.emplace_back(std::make_shared<send_buffer_sequence>(_data, _size), 0);
         its_data.queue_size_ += _size;
 
         if (!its_data.is_sending_ && unicast_socket_) { // no writing in progress
@@ -432,10 +442,11 @@ bool udp_server_endpoint_impl::send_queued_unlocked(const target_data_iterator_t
 
     if (auto its_me{std::dynamic_pointer_cast<udp_server_endpoint_impl>(shared_from_this())}) {
         _it->second.is_sending_ = true;
-        unicast_socket_->async_send_to(boost::asio::buffer(*its_entry.first), _it->first,
+        unicast_socket_->async_send_to(its_entry.first->buffers(), _it->first,
                                        [its_me, _it, its_entry](const boost::system::error_code& _error, std::size_t _bytes) {
                                            if (!_error && its_me->on_unicast_sent_ && !_it->first.address().is_multicast()) {
-                                               its_me->on_unicast_sent_(&(its_entry.first)->at(0), static_cast<uint32_t>(_bytes),
+                                               auto flat = its_entry.first->flatten();
+                                               its_me->on_unicast_sent_(flat->data(), static_cast<uint32_t>(_bytes),
                                                                         _it->first.address());
                                            }
                                            its_me->send_cbk(_it->first, _error, _bytes);

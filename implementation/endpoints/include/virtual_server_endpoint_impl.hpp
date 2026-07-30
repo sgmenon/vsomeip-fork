@@ -28,7 +28,9 @@ public:
     void set_connected(bool _connected);
 
     bool send(const byte_t* _data, uint32_t _size);
+    bool send(const send_buffer_sequence_ptr_t& _sequence);
     bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence);
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     void receive();
 

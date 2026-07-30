@@ -196,7 +196,7 @@ void udp_client_endpoint_impl::restart(bool _force) {
     start_connect_timer();
 }
 
-void udp_client_endpoint_impl::send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry) {
+void udp_client_endpoint_impl::send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) {
 
 #if 0
     std::stringstream msg;
@@ -224,7 +224,7 @@ void udp_client_endpoint_impl::send_queued(std::pair<message_buffer_ptr_t, uint3
             last_sent_ = std::chrono::steady_clock::time_point();
         }
         // Send
-        socket_->async_send(boost::asio::buffer(*_entry.first),
+        socket_->async_send(_entry.first->buffers(),
                             std::bind(&udp_client_endpoint_base_impl::send_cbk, shared_from_this(), std::placeholders::_1,
                                       std::placeholders::_2, _entry.first));
     }
@@ -405,7 +405,7 @@ std::string udp_client_endpoint_impl::get_remote_information() const {
 }
 
 void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                        const message_buffer_ptr_t& _sent_msg) {
+                                        const send_buffer_sequence_ptr_t& _sent_msg) {
     (void)_bytes;
     if (!_error) {
         std::lock_guard<std::recursive_mutex> its_lock(mutex_);
@@ -439,10 +439,10 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
                 client_t its_client(0);
                 session_t its_session(0);
                 if (_sent_msg && _sent_msg->size() > VSOMEIP_SESSION_POS_MAX) {
-                    its_service = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SERVICE_POS_MIN]);
-                    its_method = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_METHOD_POS_MIN]);
-                    its_client = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_CLIENT_POS_MIN]);
-                    its_session = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SESSION_POS_MIN]);
+                    _sent_msg->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+                    _sent_msg->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+                    _sent_msg->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+                    _sent_msg->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
                 }
                 VSOMEIP_WARNING << "uce::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value() << ") "
                                 << get_remote_information() << " " << std::dec << queue_.size() << " " << std::dec << queue_size_ << " ("
@@ -490,10 +490,10 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
         client_t its_client(0);
         session_t its_session(0);
         if (_sent_msg && _sent_msg->size() > VSOMEIP_SESSION_POS_MAX) {
-            its_service = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SERVICE_POS_MIN]);
-            its_method = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_METHOD_POS_MIN]);
-            its_client = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_CLIENT_POS_MIN]);
-            its_session = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SESSION_POS_MIN]);
+            _sent_msg->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+            _sent_msg->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+            _sent_msg->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+            _sent_msg->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
         }
         VSOMEIP_WARNING << "uce::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value() << ") "
                         << get_remote_information() << " "

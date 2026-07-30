@@ -154,6 +154,12 @@ bool tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition
     return send_intern(its_target, _data, _size);
 }
 
+bool tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+    std::lock_guard<std::mutex> its_lock(mutex_);
+    endpoint_type its_target(_target->get_address(), _target->get_port());
+    return send_intern(its_target, _sequence);
+}
+
 bool tcp_server_endpoint_impl::send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
     std::lock_guard<std::mutex> its_lock(mutex_);
     const endpoint_type its_target(_target->get_address(), _target->get_port());
@@ -161,7 +167,7 @@ bool tcp_server_endpoint_impl::send_error(const std::shared_ptr<endpoint_definit
     auto& its_data = its_target_iterator->second;
 
     if (check_queue_limit(_data, _size, its_data) && check_message_size(_size)) {
-        its_data.queue_.emplace_back(std::make_pair(std::make_shared<message_buffer_t>(_data, _data + _size), 0));
+        its_data.queue_.emplace_back(std::make_shared<send_buffer_sequence>(_data, _size), 0);
         its_data.queue_size_ += _size;
 
         if (!its_data.is_sending_) { // no writing in progress
@@ -196,9 +202,10 @@ bool tcp_server_endpoint_impl::send_queued(const target_data_iterator_type _it) 
                 // check all outstanding messages of this connection
                 // whether stop handlers need to be called
                 for (const auto& its_q : _it->second.queue_) {
-                    auto its_buffer(its_q.first);
-                    if (its_buffer && its_buffer->size() > VSOMEIP_SESSION_POS_MAX) {
-                        service_t its_service = bithelper::read_uint16_be(&(*its_buffer)[VSOMEIP_SERVICE_POS_MIN]);
+                    auto its_sequence(its_q.first);
+                    if (its_sequence && its_sequence->size() > VSOMEIP_SESSION_POS_MAX) {
+                        service_t its_service(0);
+                        its_sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
                         its_services.insert(its_service);
                     }
                 }
@@ -510,15 +517,19 @@ void tcp_server_endpoint_impl::connection::send_queued(const target_data_iterato
         VSOMEIP_ERROR << instance_name_ << __func__ << ": couldn't lock server_";
         return;
     }
-    message_buffer_ptr_t its_buffer = _it->second.queue_.front().first;
-    const service_t its_service = bithelper::read_uint16_be(&(*its_buffer)[VSOMEIP_SERVICE_POS_MIN]);
-    const method_t its_method = bithelper::read_uint16_be(&(*its_buffer)[VSOMEIP_METHOD_POS_MIN]);
-    const client_t its_client = bithelper::read_uint16_be(&(*its_buffer)[VSOMEIP_CLIENT_POS_MIN]);
-    const session_t its_session = bithelper::read_uint16_be(&(*its_buffer)[VSOMEIP_SESSION_POS_MIN]);
+    send_buffer_sequence_ptr_t its_sequence = _it->second.queue_.front().first;
+    service_t its_service(0);
+    method_t its_method(0);
+    client_t its_client(0);
+    session_t its_session(0);
+    its_sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+    its_sequence->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+    its_sequence->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+    its_sequence->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
     if (use_magic_cookies_) {
         const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cookie_sent_) > std::chrono::milliseconds(10000)) {
-            if (send_magic_cookie(its_buffer)) {
+            if (send_magic_cookie(its_sequence)) {
                 last_cookie_sent_ = now;
                 _it->second.queue_size_ += sizeof(SERVICE_COOKIE);
             }
@@ -530,18 +541,19 @@ void tcp_server_endpoint_impl::connection::send_queued(const target_data_iterato
         _it->second.is_sending_ = true;
 
         boost::asio::async_write(
-                socket_, boost::asio::buffer(*its_buffer),
+                socket_, its_sequence->buffers(),
                 std::bind(&tcp_server_endpoint_impl::connection::write_completion_condition, shared_from_this(), std::placeholders::_1,
-                          std::placeholders::_2, its_buffer->size(), its_service, its_method, its_client, its_session,
+                          std::placeholders::_2, its_sequence->size(), its_service, its_method, its_client, its_session,
                           std::chrono::steady_clock::now()),
                 std::bind(&tcp_server_endpoint_base_impl::send_cbk, its_server, _it->first, std::placeholders::_1, std::placeholders::_2));
     }
 }
 
-bool tcp_server_endpoint_impl::connection::send_magic_cookie(message_buffer_ptr_t& _buffer) {
+bool tcp_server_endpoint_impl::connection::send_magic_cookie(send_buffer_sequence_ptr_t& _sequence) {
     if (max_message_size_ == MESSAGE_SIZE_UNLIMITED
-        || max_message_size_ - _buffer->size() >= VSOMEIP_SOMEIP_HEADER_SIZE + VSOMEIP_SOMEIP_MAGIC_COOKIE_SIZE) {
-        _buffer->insert(_buffer->begin(), SERVICE_COOKIE, SERVICE_COOKIE + sizeof(SERVICE_COOKIE));
+        || max_message_size_ - _sequence->size() >= VSOMEIP_SOMEIP_HEADER_SIZE + VSOMEIP_SOMEIP_MAGIC_COOKIE_SIZE) {
+        auto cookie = std::make_shared<message_buffer_t>(SERVICE_COOKIE, SERVICE_COOKIE + sizeof(SERVICE_COOKIE));
+        _sequence->prepend(std::move(cookie));
         return true;
     }
     return false;

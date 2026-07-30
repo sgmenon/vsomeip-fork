@@ -11,11 +11,14 @@
 #include <vsomeip/primitive_types.hpp>
 #include <vsomeip/constants.hpp>
 
+#include <memory>
 #include <vector>
 
 namespace vsomeip_v3 {
 
 class endpoint_definition;
+struct send_buffer_sequence;
+using send_buffer_sequence_ptr_t = std::shared_ptr<send_buffer_sequence>;
 
 class endpoint {
 public:
@@ -39,7 +42,9 @@ public:
     virtual bool is_established_or_connected() const = 0;
 
     virtual bool send(const byte_t* _data, uint32_t _size) = 0;
+    virtual bool send(const send_buffer_sequence_ptr_t& _sequence) = 0;
     virtual bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) = 0;
+    virtual bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) = 0;
     virtual bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) = 0;
     virtual void receive() = 0;
 

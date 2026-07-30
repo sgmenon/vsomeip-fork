@@ -49,8 +49,10 @@ public:
     virtual ~client_endpoint_impl();
 
     bool send(const uint8_t* _data, uint32_t _size);
+    bool send(const send_buffer_sequence_ptr_t& _sequence);
     bool send(const std::vector<byte_t>& _cmd_header, const byte_t* _data, uint32_t _size);
     bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence);
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     bool flush();
 
@@ -77,7 +79,7 @@ public:
     void connect_cbk(boost::system::error_code const& _error);
     void wait_connect_cbk(boost::system::error_code const& _error);
     void wait_connecting_cbk(boost::system::error_code const& _error);
-    virtual void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const message_buffer_ptr_t& _sent_msg);
+    virtual void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const send_buffer_sequence_ptr_t& _sent_msg);
     void flush_cbk(boost::system::error_code const& _error);
     bool wait_connecting_timer();
 
@@ -91,8 +93,8 @@ protected:
 
     enum class connecting_timer_state_e : std::uint8_t { IN_PROGRESS, FINISH_SUCCESS, FINISH_ERROR };
 
-    std::pair<message_buffer_ptr_t, uint32_t> get_front();
-    virtual void send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry) = 0;
+    std::pair<send_buffer_sequence_ptr_t, uint32_t> get_front();
+    virtual void send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) = 0;
     virtual void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
                                                     std::chrono::nanoseconds* _maximum_retention) const = 0;
     void shutdown_and_close_socket(bool _recreate_socket, bool _due_to_error);
@@ -101,7 +103,7 @@ protected:
     void start_connecting_timer();
     bool check_message_size(uint32_t _size) const;
     typename endpoint_impl<Protocol>::cms_ret_e segment_message(const std::uint8_t* const _data, std::uint32_t _size);
-    bool check_queue_limit(const uint8_t* _data, std::uint32_t _size) const;
+    bool check_queue_limit(const send_buffer_sequence_ptr_t& _sequence, std::uint32_t _size) const;
     void queue_train(const std::shared_ptr<train>& _train);
     void update_last_departure();
     bool ensure_connected(const boost::system::error_code& _error);
@@ -133,7 +135,7 @@ protected:
     std::chrono::steady_clock::time_point last_departure_;
     std::atomic<bool> has_last_departure_;
 
-    std::deque<std::pair<message_buffer_ptr_t, uint32_t>> queue_;
+    std::deque<std::pair<send_buffer_sequence_ptr_t, uint32_t>> queue_;
     std::size_t queue_size_;
 
     mutable std::recursive_mutex mutex_;

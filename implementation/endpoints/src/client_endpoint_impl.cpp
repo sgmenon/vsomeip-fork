@@ -137,9 +137,9 @@ void client_endpoint_impl<Protocol>::stop(bool _due_to_error) {
 }
 
 template<typename Protocol>
-std::pair<message_buffer_ptr_t, uint32_t> client_endpoint_impl<Protocol>::get_front() {
+std::pair<send_buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::get_front() {
 
-    std::pair<message_buffer_ptr_t, uint32_t> its_entry;
+    std::pair<send_buffer_sequence_ptr_t, uint32_t> its_entry;
     if (queue_.size())
         its_entry = queue_.front();
 
@@ -158,6 +158,16 @@ bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_defi
 }
 
 template<typename Protocol>
+bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+
+    (void)_target;
+    (void)_sequence;
+    VSOMEIP_ERROR << "Clients endpoints must not be used to "
+                  << "send to explicitely specified targets";
+    return false;
+}
+
+template<typename Protocol>
 bool client_endpoint_impl<Protocol>::send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
 
     (void)_target;
@@ -170,24 +180,30 @@ bool client_endpoint_impl<Protocol>::send_error(const std::shared_ptr<endpoint_d
 
 template<typename Protocol>
 bool client_endpoint_impl<Protocol>::send(const uint8_t* _data, uint32_t _size) {
+    return send(std::make_shared<send_buffer_sequence>(_data, _size));
+}
+
+template<typename Protocol>
+bool client_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& _sequence) {
+
+    if (!_sequence || _sequence->empty()) {
+        return false;
+    }
 
     std::lock_guard<std::recursive_mutex> its_lock(mutex_);
     bool must_depart(false);
     auto its_now(std::chrono::steady_clock::now());
+    const uint32_t _size = static_cast<uint32_t>(_sequence->size());
 
-#if 0
-    std::stringstream msg;
-    msg << "cei::send: ";
-    for (uint32_t i = 0; i < _size; i++)
-    msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(_data[i]) << " ";
-    VSOMEIP_DEBUG << msg.str();
-#endif
-
-    if (endpoint_impl<Protocol>::sending_blocked_ || !check_queue_limit(_data, _size)) {
+    if (endpoint_impl<Protocol>::sending_blocked_ || !check_queue_limit(_sequence, _size)) {
         return false;
     }
 
     if (!check_message_size(_size)) {
+        // TODO(tech-debt): SOME/IP-TP splitter still needs contiguous pointer arithmetic.
+        // Open: segment multi-buffer sequences without flatten().
+        auto flat = _sequence->flatten();
+        const uint8_t* _data = flat->data();
         return segment_message(_data, _size) == endpoint_impl<Protocol>::cms_ret_e::MSG_WAS_SPLIT;
     }
 
@@ -195,8 +211,10 @@ bool client_endpoint_impl<Protocol>::send(const uint8_t* _data, uint32_t _size) 
     cancel_dispatch_timer();
 
     // STEP 3: Get configured timings
-    const service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-    const service_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
+    service_t its_service(0);
+    method_t its_method(0);
+    _sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+    _sequence->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
 
     std::chrono::nanoseconds its_debouncing(0), its_retention(0);
     get_configured_times_from_endpoint(its_service, its_method, &its_debouncing, &its_retention);
@@ -211,7 +229,7 @@ bool client_endpoint_impl<Protocol>::send(const uint8_t* _data, uint32_t _size) 
             must_depart = true;
         } else {
             // STEP 5: Check whether the current message fits into the current train
-            if (train_->buffer_->size() + _size > endpoint_impl<Protocol>::max_message_size_) {
+            if (train_->sequence_->size() + _size > endpoint_impl<Protocol>::max_message_size_) {
                 must_depart = true;
             } else {
                 // STEP 6: Check debouncing time
@@ -251,8 +269,8 @@ bool client_endpoint_impl<Protocol>::send(const uint8_t* _data, uint32_t _size) 
         train_->departure_ = its_now + its_retention;
     }
 
-    // STEP 9: insert current message buffer
-    train_->buffer_->insert(train_->buffer_->end(), _data, _data + _size);
+    // STEP 9: append current message buffers (no forced byte concat)
+    train_->sequence_->append_sequence(*_sequence);
     train_->passengers_.insert(its_identifier);
     // STEP 9.1: update the trains minimal debounce time if necessary
     if (its_debouncing < train_->minimal_debounce_time_) {
@@ -307,7 +325,7 @@ void client_endpoint_impl<Protocol>::send_segments(const tp::tp_split_messages_t
     }
 
     for (const auto& s : _segments) {
-        queue_.emplace_back(std::make_pair(s, _separation_time));
+        queue_.emplace_back(std::make_pair(std::make_shared<send_buffer_sequence>(s), _separation_time));
         queue_size_ += s->size();
     }
 
@@ -365,7 +383,7 @@ bool client_endpoint_impl<Protocol>::flush() {
         }
     }
 
-    if (!its_train->buffer_->empty()) {
+    if (!its_train->sequence_->empty()) {
 
         queue_train(its_train);
 
@@ -512,7 +530,7 @@ void client_endpoint_impl<Protocol>::wait_connecting_cbk(boost::system::error_co
 
 template<typename Protocol>
 void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                              const message_buffer_ptr_t& _sent_msg) {
+                                              const send_buffer_sequence_ptr_t& _sent_msg) {
 
     (void)_bytes;
 
@@ -560,10 +578,10 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                 client_t its_client(0);
                 session_t its_session(0);
                 if (_sent_msg && _sent_msg->size() > VSOMEIP_SESSION_POS_MAX) {
-                    its_service = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SERVICE_POS_MIN]);
-                    its_method = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_METHOD_POS_MIN]);
-                    its_client = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_CLIENT_POS_MIN]);
-                    its_session = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SESSION_POS_MIN]);
+                    _sent_msg->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+                    _sent_msg->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+                    _sent_msg->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+                    _sent_msg->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
                 }
                 VSOMEIP_WARNING << "cei::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value() << ") "
                                 << get_remote_information() << " " << std::dec << queue_.size() << " " << std::dec << queue_size_ << " ("
@@ -614,10 +632,10 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
         client_t its_client(0);
         session_t its_session(0);
         if (_sent_msg && _sent_msg->size() > VSOMEIP_SESSION_POS_MAX) {
-            its_service = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SERVICE_POS_MIN]);
-            its_method = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_METHOD_POS_MIN]);
-            its_client = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_CLIENT_POS_MIN]);
-            its_session = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SESSION_POS_MIN]);
+            _sent_msg->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+            _sent_msg->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+            _sent_msg->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+            _sent_msg->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
         }
         VSOMEIP_WARNING << "cei::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value()
                         << "), remote: " << get_remote_information() << " " << queue_.size() << " " << queue_size_ << " (" << std::hex
@@ -810,7 +828,7 @@ typename endpoint_impl<Protocol>::cms_ret_e client_endpoint_impl<Protocol>::segm
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::check_queue_limit(const uint8_t* _data, std::uint32_t _size) const {
+bool client_endpoint_impl<Protocol>::check_queue_limit(const send_buffer_sequence_ptr_t& _sequence, std::uint32_t _size) const {
 
     if (endpoint_impl<Protocol>::queue_limit_ != QUEUE_SIZE_UNLIMITED
         && (queue_size_ + _size > endpoint_impl<Protocol>::queue_limit_ || queue_size_ + _size < _size)) { // overflow protection
@@ -818,18 +836,11 @@ bool client_endpoint_impl<Protocol>::check_queue_limit(const uint8_t* _data, std
         method_t its_method(0);
         client_t its_client(0);
         session_t its_session(0);
-        if (_size >= VSOMEIP_SESSION_POS_MAX) {
-            // this will yield wrong IDs for local communication as the commands
-            // are prepended to the actual payload
-            // it will print:
-            // (lowbyte service ID + highbyte methoid)
-            // [(Command + lowerbyte sender's client ID).
-            //  highbyte sender's client ID + lowbyte command size.
-            //  lowbyte methodid + highbyte vsomeip length]
-            its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-            its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
-            its_client = bithelper::read_uint16_be(&_data[VSOMEIP_CLIENT_POS_MIN]);
-            its_session = bithelper::read_uint16_be(&_data[VSOMEIP_SESSION_POS_MIN]);
+        if (_sequence && _size >= VSOMEIP_SESSION_POS_MAX) {
+            _sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+            _sequence->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+            _sequence->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+            _sequence->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
         }
         VSOMEIP_ERROR << "cei::check_queue_limit: queue size limit (" << std::dec << endpoint_impl<Protocol>::queue_limit_
                       << ") reached. Dropping message (" << std::hex << std::setfill('0') << std::setw(4) << its_client << "): ["
@@ -843,8 +854,8 @@ bool client_endpoint_impl<Protocol>::check_queue_limit(const uint8_t* _data, std
 template<typename Protocol>
 void client_endpoint_impl<Protocol>::queue_train(const std::shared_ptr<train>& _train) {
 
-    queue_size_ += _train->buffer_->size();
-    queue_.emplace_back(_train->buffer_, 0);
+    queue_size_ += _train->sequence_->size();
+    queue_.emplace_back(_train->sequence_, 0);
 
     if (!is_sending_ && !queue_.empty()) { // no writing in progress
         auto its_entry = get_front();

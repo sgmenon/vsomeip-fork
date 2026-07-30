@@ -100,6 +100,11 @@ bool vsomeip_v3::server_endpoint_impl<Protocol>::send(const uint8_t* /*_data*/, 
 }
 
 template<typename Protocol>
+bool vsomeip_v3::server_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& /*_sequence*/) {
+    return true;
+}
+
+template<typename Protocol>
 typename vsomeip_v3::server_endpoint_impl<Protocol>::clients_key_t
 vsomeip_v3::server_endpoint_impl<Protocol>::to_clients_key(service_t its_service, method_t its_method, client_t its_client) {
     return (static_cast<clients_key_t>(its_service) << 48) | (static_cast<clients_key_t>(its_method) << 32)
@@ -114,6 +119,11 @@ bool vsomeip_v3::server_endpoint_impl<Protocol>::send(const std::vector<byte_t>&
 
 template<typename Protocol>
 bool vsomeip_v3::server_endpoint_impl<Protocol>::send_intern(endpoint_type /*_target*/, const byte_t* /*_data*/, uint32_t /*_size*/) {
+    return true;
+}
+
+template<typename Protocol>
+bool vsomeip_v3::server_endpoint_impl<Protocol>::send_intern(endpoint_type /*_target*/, const send_buffer_sequence_ptr_t& /*_sequence*/) {
     return true;
 }
 
@@ -150,6 +160,12 @@ vsomeip_v3::server_endpoint_impl<Protocol>::segment_message(const std::uint8_t* 
 
 template<typename Protocol>
 void vsomeip_v3::server_endpoint_impl<Protocol>::recalculate_queue_size(endpoint_data_type& /*_data*/) const { }
+
+template<typename Protocol>
+bool vsomeip_v3::server_endpoint_impl<Protocol>::check_queue_limit(const send_buffer_sequence_ptr_t& /*_sequence*/, std::uint32_t /*_size*/,
+                                                                   endpoint_data_type& /*_endpoint_data*/) const {
+    return true;
+}
 
 template<typename Protocol>
 bool vsomeip_v3::server_endpoint_impl<Protocol>::check_queue_limit(const uint8_t* /*_data*/, std::uint32_t /*_size*/,

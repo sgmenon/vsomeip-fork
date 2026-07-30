@@ -235,6 +235,11 @@ void fake_tcp_socket_handle::clear_handler() {
 }
 
 void fake_tcp_socket_handle::write(std::vector<boost::asio::const_buffer> const& _buffer, rw_handler _handler) {
+    {
+        auto const lock = std::scoped_lock(mtx_);
+        last_write_buffer_count_ = _buffer.size();
+    }
+
     auto receiver = [&]() -> std::shared_ptr<fake_tcp_socket_handle> {
         auto const lock = std::scoped_lock(mtx_);
         return connected_socket_.lock();
@@ -353,6 +358,11 @@ void fake_tcp_socket_handle::ignore_inner_close() {
 fd_t fake_tcp_socket_handle::fd() {
     auto const lock = std::scoped_lock(mtx_);
     return socket_id_.fd_;
+}
+
+size_t fake_tcp_socket_handle::last_write_buffer_count() const {
+    auto const lock = std::scoped_lock(mtx_);
+    return last_write_buffer_count_;
 }
 
 fake_tcp_acceptor_handle::fake_tcp_acceptor_handle(boost::asio::io_context& _io) : io_(_io) { }

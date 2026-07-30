@@ -5,10 +5,10 @@
 
 #include "to_string.hpp"
 
-#include "../../../../implementation/protocol/src/routing_info_command.cpp"
-#include "../../../../implementation/protocol/src/config_command.cpp"
-#include "../../../../implementation/protocol/src/command.cpp"
-#include "../../../../implementation/protocol/src/routing_info_entry.cpp"
+#include "../../../../implementation/protocol/include/routing_info_command.hpp"
+#include "../../../../implementation/protocol/include/config_command.hpp"
+#include "../../../../implementation/protocol/include/command.hpp"
+#include "../../../../implementation/protocol/include/routing_info_entry.hpp"
 
 #include <ostream>
 #include <iomanip>

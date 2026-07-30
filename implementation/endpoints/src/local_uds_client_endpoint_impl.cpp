@@ -185,9 +185,18 @@ void local_uds_client_endpoint_impl::receive() {
 // this overrides client_endpoint_impl::send to disable the pull method
 // for local communication
 bool local_uds_client_endpoint_impl::send(const uint8_t* _data, uint32_t _size) {
-    std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+    return send(std::make_shared<send_buffer_sequence>(_data, _size));
+}
 
-    if (endpoint_impl::sending_blocked_ || !check_queue_limit(_data, _size)) {
+bool local_uds_client_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
+    if (!_sequence || _sequence->empty()) {
+        return false;
+    }
+
+    std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+    const uint32_t _size = static_cast<uint32_t>(_sequence->size());
+
+    if (endpoint_impl::sending_blocked_ || !check_queue_limit(_sequence, _size)) {
         return false;
     }
     if (!check_message_size(_size)) {
@@ -198,39 +207,38 @@ bool local_uds_client_endpoint_impl::send(const uint8_t* _data, uint32_t _size) 
     }
 #if 0
     std::stringstream msg;
-    msg << "lce::send: ";
-    for (uint32_t i = 0; i < _size; i++)
-        msg << std::hex << std::setfill('0') << std::setw(2)
-            << static_cast<int>(_data[i]) << " ";
+    msg << "lce::send size=" << _size;
     VSOMEIP_INFO << msg.str();
 #endif
     queue_train_buffer(_size);
-    train_->buffer_->insert(train_->buffer_->end(), _data, _data + _size);
+    train_->sequence_->append_sequence(*_sequence);
     queue_train(train_);
-    train_->buffer_ = std::make_shared<message_buffer_t>();
+    train_->sequence_ = std::make_shared<send_buffer_sequence>();
     return true;
 }
 
-void local_uds_client_endpoint_impl::send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry) {
+void local_uds_client_endpoint_impl::send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) {
 
     static const byte_t its_start_tag[] = {0x67, 0x37, 0x6D, 0x07};
     static const byte_t its_end_tag[] = {0x07, 0x6D, 0x37, 0x67};
     std::vector<boost::asio::const_buffer> bufs;
 
     bufs.push_back(boost::asio::buffer(its_start_tag));
-    bufs.push_back(boost::asio::buffer(*_entry.first));
+    for (const auto& buf : _entry.first->buffers()) {
+        bufs.push_back(buf);
+    }
     bufs.push_back(boost::asio::buffer(its_end_tag));
 
     {
         std::lock_guard<std::mutex> its_lock(socket_mutex_);
 
         auto its_me{std::dynamic_pointer_cast<local_uds_client_endpoint_impl>(shared_from_this())};
-        auto buffer_ptr = _entry.first; // Capture shared_ptr to ensure it stays alive
+        auto sequence_ptr = _entry.first;
 
         if (socket_->is_open()) {
             boost::asio::async_write(*socket_, bufs,
-                                     strand_.wrap([its_me, buffer_ptr](const boost::system::error_code& ec, std::size_t bytes_transferred) {
-                                         its_me->send_cbk(ec, bytes_transferred, buffer_ptr);
+                                     strand_.wrap([its_me, sequence_ptr](const boost::system::error_code& ec, std::size_t bytes_transferred) {
+                                         its_me->send_cbk(ec, bytes_transferred, sequence_ptr);
                                      }));
         } else {
             VSOMEIP_WARNING << "lucei::" << __func__ << ": try to send while socket was not open | endpoint > " << this;
@@ -325,7 +333,7 @@ std::string local_uds_client_endpoint_impl::get_remote_information() const {
 }
 
 bool local_uds_client_endpoint_impl::check_packetizer_space(std::uint32_t _size) const {
-    if (train_->buffer_->size() + _size < train_->buffer_->size()) {
+    if (train_->sequence_->size() + _size < train_->sequence_->size()) {
         VSOMEIP_ERROR << "lucei: Overflow in packetizer addition ~> abort sending!"
                       << " endpoint > " << this;
         return false;
@@ -334,10 +342,10 @@ bool local_uds_client_endpoint_impl::check_packetizer_space(std::uint32_t _size)
 }
 
 bool local_uds_client_endpoint_impl::queue_train_buffer(std::uint32_t _size) {
-    if (train_->buffer_->size() + _size > max_message_size_ && !train_->buffer_->empty()) {
-        queue_.push_back(std::make_pair(train_->buffer_, 0));
-        queue_size_ += train_->buffer_->size();
-        train_->buffer_ = std::make_shared<message_buffer_t>();
+    if (train_->sequence_->size() + _size > max_message_size_ && !train_->sequence_->empty()) {
+        queue_.push_back(std::make_pair(train_->sequence_, 0));
+        queue_size_ += train_->sequence_->size();
+        train_->sequence_ = std::make_shared<send_buffer_sequence>();
         return true;
     }
     return false;

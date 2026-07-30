@@ -7,7 +7,8 @@ project("unit_tests_endpoint_tests" LANGUAGES CXX)
 
 set(TEST_SRCS
     ../main.cpp
-    test_timer.cpp)
+    test_timer.cpp
+    test_send_buffer_sequence.cpp)
 
 # We need to set the source files directly because vsomeip doesn't export the
 # timer for linking.

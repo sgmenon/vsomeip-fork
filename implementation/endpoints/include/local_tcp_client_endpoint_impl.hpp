@@ -39,12 +39,13 @@ public:
 
     // this overrides client_endpoint_impl::send to disable the pull method
     // for local communication
+    bool send(const send_buffer_sequence_ptr_t& _sequence);
     bool send(const uint8_t* _data, uint32_t _size);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
                                             std::chrono::nanoseconds* _maximum_retention) const;
 
 private:
-    void send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry);
+    void send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry);
 
     void connect();
     void receive();

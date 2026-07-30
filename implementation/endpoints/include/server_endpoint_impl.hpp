@@ -49,7 +49,7 @@ public:
         std::chrono::steady_clock::time_point last_departure_;
         bool has_last_departure_;
 
-        std::deque<std::pair<message_buffer_ptr_t, uint32_t>> queue_;
+        std::deque<std::pair<send_buffer_sequence_ptr_t, uint32_t>> queue_;
         std::size_t queue_size_;
 
         bool is_sending_;
@@ -76,6 +76,7 @@ public:
     void set_established(bool _established);
     void set_connected(bool _connected);
     bool send(const uint8_t* _data, uint32_t _size);
+    bool send(const send_buffer_sequence_ptr_t& _sequence);
     bool send(const std::vector<byte_t>& _cmd_header, const byte_t* _data, uint32_t _size);
 
     void prepare_stop(const endpoint::prepare_stop_handler_t& _handler, service_t _service);
@@ -94,7 +95,9 @@ public:
 
 protected:
     // The caller must hold the `mutex_` lock
-    virtual bool send_intern(endpoint_type _target, const byte_t* _data, uint32_t _port);
+    virtual bool send_intern(endpoint_type _target, const byte_t* _data, uint32_t _size);
+    // The caller must hold the `mutex_` lock
+    virtual bool send_intern(endpoint_type _target, const send_buffer_sequence_ptr_t& _sequence);
     // The caller must hold the `mutex_` lock
     virtual bool send_queued(const target_data_iterator_type _it) = 0;
     virtual void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
@@ -109,6 +112,7 @@ protected:
     typename endpoint_impl<Protocol>::cms_ret_e segment_message(const std::uint8_t* const _data, std::uint32_t _size,
                                                                 const endpoint_type& _target);
     // The caller must hold the `mutex_` lock
+    bool check_queue_limit(const send_buffer_sequence_ptr_t& _sequence, std::uint32_t _size, endpoint_data_type& _endpoint_data) const;
     bool check_queue_limit(const uint8_t* _data, std::uint32_t _size, endpoint_data_type& _endpoint_data) const;
     // The caller must hold the `mutex_` lock
     bool queue_train(const target_data_iterator_type _it, const std::shared_ptr<train>& _train);

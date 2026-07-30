@@ -184,6 +184,8 @@ struct fake_tcp_socket_handle : std::enable_shared_from_this<fake_tcp_socket_han
 
     fd_t fd();
 
+    [[nodiscard]] size_t last_write_buffer_count() const;
+
     attribute_recorder<protocol::id_e> received_command_record_;
 
 private:
@@ -208,6 +210,7 @@ private:
     boost::asio::ip::tcp::endpoint local_ep_;
     boost::asio::ip::tcp::endpoint remote_ep_;
     std::optional<std::chrono::milliseconds> block_on_close_time_;
+    size_t last_write_buffer_count_{0};
     mutable std::mutex mtx_;
 };
 

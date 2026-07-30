@@ -25,7 +25,7 @@ local_client_endpoint_impl<Protocol>::local_client_endpoint_impl(const std::shar
 
 template<typename Protocol>
 void local_client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                                    const message_buffer_ptr_t& _sent_msg) {
+                                                    const send_buffer_sequence_ptr_t& _sent_msg) {
 
     if (!_error) {
         client_endpoint_impl<Protocol>::send_cbk(_error, _bytes, _sent_msg);
