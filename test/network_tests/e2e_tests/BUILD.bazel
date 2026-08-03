@@ -1,0 +1,97 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# External E2E network-test binaries (CRC8/CRC32, Profile 04, Profile 07).
+# Multi-host orchestration: //test/network_tests/docker_tests/run-test.sh
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+package(default_visibility = ["//test/network_tests:__subpackages__"])
+
+_COMMON_DEPS = [
+    "//:vsomeip",
+    "//:vsomeip-sd",
+    "//test/common:vsomeip_utilities",
+    "//test/network_tests:someip_test_globals",
+    "@googletest//:gtest",
+]
+
+_COMMON_LINKOPTS = [
+    "-Wl,--no-as-needed",
+    "-Wl,-rpath,$$ORIGIN",
+]
+
+cc_binary(
+    name = "e2e_test_client",
+    testonly = True,
+    srcs = [
+        "e2e_test_client.cpp",
+        "e2e_test_client.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)
+
+cc_binary(
+    name = "e2e_test_service",
+    testonly = True,
+    srcs = [
+        "e2e_test_service.cpp",
+        "e2e_test_service.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)
+
+cc_binary(
+    name = "e2e_profile_04_test_client",
+    testonly = True,
+    srcs = [
+        "e2e_profile_04_test_client.cpp",
+        "e2e_profile_04_test_client.hpp",
+        "e2e_profile_04_test_common.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)
+
+cc_binary(
+    name = "e2e_profile_04_test_service",
+    testonly = True,
+    srcs = [
+        "e2e_profile_04_test_service.cpp",
+        "e2e_profile_04_test_service.hpp",
+        "e2e_profile_04_test_common.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)
+
+cc_binary(
+    name = "e2e_profile_07_test_client",
+    testonly = True,
+    srcs = [
+        "e2e_profile_07_test_client.cpp",
+        "e2e_profile_07_test_client.hpp",
+        "e2e_profile_07_test_common.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)
+
+cc_binary(
+    name = "e2e_profile_07_test_service",
+    testonly = True,
+    srcs = [
+        "e2e_profile_07_test_service.cpp",
+        "e2e_profile_07_test_service.hpp",
+        "e2e_profile_07_test_common.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)

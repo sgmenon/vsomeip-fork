@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include <vsomeip/primitive_types.hpp>
+#include <vsomeip/span.hpp>
 
 #include "../profile_interface/profile_interface.hpp"
 #include "../../../buffer/buffer.hpp"

@@ -7,9 +7,19 @@
 #   //test/network_tests/header_factory_tests:header_factory_test
 #   //test/network_tests/configuration_tests:configuration_test
 #
+# Network / integration tests for vsomeip.
+#
+# In-process / unit-style suites (run via `bazel test`):
+#   //test/network_tests/fake_socket_tests:fake_socket_tests
+#   //test/network_tests/header_factory_tests:header_factory_test
+#   //test/network_tests/configuration_tests:configuration_test
+#
 # Multi-host suites are NOT `bazel test` targets. Build on the host, then
 # run via Docker Compose:
 #   test/network_tests/docker_tests/run-test.sh event_test
+#   test/network_tests/docker_tests/run-test.sh e2e_crc
+#   test/network_tests/docker_tests/run-test.sh e2e_p04
+#   test/network_tests/docker_tests/run-test.sh e2e_p07
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
 

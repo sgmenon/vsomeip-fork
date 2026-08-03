@@ -74,10 +74,15 @@ if [[ ! -f "${TEST_ENV_FILE}" ]]; then
     exit 1
 fi
 
+# Export everything from test.env so docker compose can substitute
+# CLIENT_BIN / SERVICE_BIN / container names / etc.
 # shellcheck disable=SC1090
+set -a
 source "${TEST_ENV_FILE}"
+set +a
 
 PKG_DIR="${STAGING_ROOT}/${TEST_NAME}"
+export PKG_DIR
 TIMEOUT="${OVERRIDE_TIMEOUT:-${TIMEOUT:-90}}"
 WAIT_CONTAINER="${WAIT_CONTAINER:?WAIT_CONTAINER must be set in test.env}"
 BRIDGE_NAME="${BRIDGE_NAME:?BRIDGE_NAME must be set in test.env}"

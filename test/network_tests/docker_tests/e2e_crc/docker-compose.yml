@@ -1,0 +1,56 @@
+# Shared compose for external E2E suites (client=master, service=slave).
+# Per-suite test.env supplies CLIENT_BIN / SERVICE_BIN / CLIENT_CFG / SERVICE_CFG
+# and unique container / bridge names.
+
+services:
+  slave:
+    build: ${PKG_DIR}/docker_infra
+    image: vsomeip-network-test:latest
+    container_name: ${SLAVE_CONTAINER}
+    cap_add:
+      - NET_ADMIN
+    networks:
+      vsomeip-net:
+        ipv4_address: 172.29.0.3
+    volumes:
+      - ${PKG_DIR}/app:/app
+      - ${PKG_DIR}/configs:/app/configs:ro
+    environment:
+      SERVICE_BIN: ${SERVICE_BIN}
+      SERVICE_CFG: ${SERVICE_CFG}
+    command: ["/app/run-slave.sh"]
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/slave-ready"]
+      interval: 1s
+      timeout: 1s
+      retries: 60
+      start_period: 2s
+
+  master:
+    build: ${PKG_DIR}/docker_infra
+    image: vsomeip-network-test:latest
+    container_name: ${MASTER_CONTAINER}
+    cap_add:
+      - NET_ADMIN
+    networks:
+      vsomeip-net:
+        ipv4_address: 172.29.0.2
+    volumes:
+      - ${PKG_DIR}/app:/app
+      - ${PKG_DIR}/configs:/app/configs:ro
+    environment:
+      CLIENT_BIN: ${CLIENT_BIN}
+      CLIENT_CFG: ${CLIENT_CFG}
+    command: ["/app/run-master.sh"]
+    depends_on:
+      slave:
+        condition: service_healthy
+
+networks:
+  vsomeip-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
+    driver_opts:
+      com.docker.network.bridge.name: "${BRIDGE_NAME}"

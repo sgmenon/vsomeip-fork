@@ -1102,29 +1102,39 @@ bool routing_manager_impl::send_to(const client_t _client, const std::shared_ptr
 
     std::shared_ptr<serializer> its_serializer(get_serializer());
     if (its_serializer->serialize(_message.get())) {
-        const byte_t* its_data = its_serializer->get_data();
+        // Patch client id into the SOME/IP header before E2E compose so the
+        // protected sequence can be sent scatter-gather without flattening.
+        byte_t* its_data = const_cast<byte_t*>(its_serializer->get_data());
         length_t its_size = its_serializer->get_size();
-        message_buffer_ptr_t its_protected;
-#ifndef ANDROID
-        if (e2e_provider_) {
-            auto its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, its_data, its_size, _message->get_instance());
-            if (its_e2e_sequence) {
-                // TODO(tech-debt #3): flatten only to mutate client id in-place, then send contiguous.
-                // Prefer writing client into the SOME/IP header buffer before compose, or a
-                // sequence-aware patch, so the E2E sequence can be sent without flattening.
-                its_protected = its_e2e_sequence->flatten();
-                its_data = its_protected->data();
-                its_size = static_cast<length_t>(its_protected->size());
-            }
-        }
-#endif
 
         uint8_t its_client[2] = {0};
         bithelper::write_uint16_le(_client, its_client);
-        const_cast<byte_t*>(its_data)[VSOMEIP_CLIENT_POS_MIN] = its_client[1];
-        const_cast<byte_t*>(its_data)[VSOMEIP_CLIENT_POS_MAX] = its_client[0];
+        its_data[VSOMEIP_CLIENT_POS_MIN] = its_client[1];
+        its_data[VSOMEIP_CLIENT_POS_MAX] = its_client[0];
 
-        is_sent = send_to(_target, its_data, its_size, _message->get_instance());
+        send_buffer_sequence_ptr_t its_e2e_sequence;
+#ifndef ANDROID
+        if (e2e_provider_) {
+            its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, its_data, its_size, _message->get_instance());
+        }
+#endif
+
+        if (its_e2e_sequence) {
+            std::shared_ptr<endpoint> its_endpoint =
+                    ep_mgr_impl_->find_server_endpoint(_target->get_remote_port(), _target->is_reliable());
+            if (its_endpoint) {
+                is_sent = its_endpoint->send_to(_target, its_e2e_sequence);
+                if (is_sent) {
+                    auto its_flat = its_e2e_sequence->flatten();
+                    trace::header its_header;
+                    if (its_header.prepare(its_endpoint, true, _message->get_instance()))
+                        tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_flat->data(),
+                                   static_cast<uint32_t>(its_flat->size()));
+                }
+            }
+        } else {
+            is_sent = send_to(_target, its_data, its_size, _message->get_instance());
+        }
 
         its_serializer->reset();
         put_serializer(its_serializer);
@@ -1156,19 +1166,11 @@ bool routing_manager_impl::send_via_sd(
     // GM - Begin
     instance_t its_instance(0x0);
     send_buffer_sequence_ptr_t its_e2e_sequence;
-    message_buffer_ptr_t its_flat;
-    const byte_t* its_send_data = _data;
-    uint32_t its_send_size = _size;
 
     if (e2e_provider_) {
         VSOMEIP_DEBUG << "routing_manager_impl::send_via_sd() >>>> e2e_provider enabled, protecting SD message ..";
 #ifndef ANDROID
         its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, its_instance);
-        if (its_e2e_sequence) {
-            its_flat = its_e2e_sequence->flatten();
-            its_send_data = its_flat->data();
-            its_send_size = static_cast<uint32_t>(its_flat->size());
-        }
 #endif
     }
     // GM - End
@@ -1184,9 +1186,17 @@ bool routing_manager_impl::send_via_sd(
             is_sent = its_endpoint->send_to(_target, _data, _size);
         }
         if (is_sent && tc_->is_sd_enabled()) {
+            const byte_t* its_trace_data = _data;
+            uint32_t its_trace_size = _size;
+            message_buffer_ptr_t its_flat;
+            if (its_e2e_sequence) {
+                its_flat = its_e2e_sequence->flatten();
+                its_trace_data = its_flat->data();
+                its_trace_size = static_cast<uint32_t>(its_flat->size());
+            }
             trace::header its_header;
             if (its_header.prepare(its_endpoint, true, 0x0))
-                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
+                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_trace_data, its_trace_size);
         }
     }
     return is_sent;
