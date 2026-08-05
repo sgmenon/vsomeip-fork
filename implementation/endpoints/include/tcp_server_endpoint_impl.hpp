@@ -28,6 +28,9 @@ typedef server_endpoint_impl<boost::asio::ip::tcp> tcp_server_endpoint_base_impl
 class tcp_server_endpoint_impl : public tcp_server_endpoint_base_impl {
 
 public:
+    using endpoint::send;
+    using endpoint::send_to;
+
     tcp_server_endpoint_impl(const std::shared_ptr<endpoint_host>& _endpoint_host, const std::shared_ptr<routing_host>& _routing_host,
                              boost::asio::io_context& _io, const std::shared_ptr<configuration>& _configuration, bool _use_magic_cookies);
     virtual ~tcp_server_endpoint_impl();
@@ -36,8 +39,7 @@ public:
     void start();
     void stop(bool _due_to_error);
 
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence);
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     bool send_queued(const target_data_iterator_type _it);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,

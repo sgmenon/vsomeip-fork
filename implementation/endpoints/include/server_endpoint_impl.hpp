@@ -62,6 +62,9 @@ public:
     typedef typename target_data_type::iterator target_data_iterator_type;
     using clients_key_t = uint64_t;
 
+    using endpoint::send;
+    using endpoint::send_to;
+
     server_endpoint_impl(const std::shared_ptr<endpoint_host>& _endpoint_host, const std::shared_ptr<routing_host>& _routing_host,
                          boost::asio::io_context& _io, const std::shared_ptr<configuration>& _configuration);
     virtual ~server_endpoint_impl() = default;
@@ -75,8 +78,7 @@ public:
     bool is_established_or_connected() const;
     void set_established(bool _established);
     void set_connected(bool _connected);
-    bool send(const uint8_t* _data, uint32_t _size);
-    bool send(const send_buffer_sequence_ptr_t& _sequence);
+    bool send(const send_buffer_sequence_ptr_t& _sequence) override;
     bool send(const std::vector<byte_t>& _cmd_header, const byte_t* _data, uint32_t _size);
 
     void prepare_stop(const endpoint::prepare_stop_handler_t& _handler, service_t _service);
@@ -94,8 +96,6 @@ public:
     void remove_stop_handler(service_t _service);
 
 protected:
-    // The caller must hold the `mutex_` lock
-    virtual bool send_intern(endpoint_type _target, const byte_t* _data, uint32_t _size);
     // The caller must hold the `mutex_` lock
     virtual bool send_intern(endpoint_type _target, const send_buffer_sequence_ptr_t& _sequence);
     // The caller must hold the `mutex_` lock

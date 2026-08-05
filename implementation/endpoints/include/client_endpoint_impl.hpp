@@ -43,16 +43,17 @@ public:
     typedef typename Protocol::endpoint endpoint_type;
     using socket_type = std::conditional_t<std::is_same_v<Protocol, boost::asio::ip::tcp>, tcp_socket, typename Protocol::socket>;
 
+    using endpoint::send;
+    using endpoint::send_to;
+
     client_endpoint_impl(const std::shared_ptr<endpoint_host>& _endpoint_host, const std::shared_ptr<routing_host>& _routing_host,
                          const endpoint_type& _local, const endpoint_type& _remote, boost::asio::io_context& _io,
                          const std::shared_ptr<configuration>& _configuration);
     virtual ~client_endpoint_impl();
 
-    bool send(const uint8_t* _data, uint32_t _size);
-    bool send(const send_buffer_sequence_ptr_t& _sequence);
+    bool send(const send_buffer_sequence_ptr_t& _sequence) override;
     bool send(const std::vector<byte_t>& _cmd_header, const byte_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence);
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     bool flush();
 

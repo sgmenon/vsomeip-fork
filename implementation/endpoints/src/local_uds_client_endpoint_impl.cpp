@@ -184,10 +184,6 @@ void local_uds_client_endpoint_impl::receive() {
 
 // this overrides client_endpoint_impl::send to disable the pull method
 // for local communication
-bool local_uds_client_endpoint_impl::send(const uint8_t* _data, uint32_t _size) {
-    return send(std::make_shared<send_buffer_sequence>(_data, _size));
-}
-
 bool local_uds_client_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
     if (!_sequence || _sequence->empty()) {
         return false;

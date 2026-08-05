@@ -131,10 +131,6 @@ void local_tcp_server_endpoint_impl::stop(bool /*_due_to_error*/) {
     }
 }
 
-bool local_tcp_server_endpoint_impl::send(const uint8_t* _data, uint32_t _size) {
-    return send(std::make_shared<send_buffer_sequence>(_data, _size));
-}
-
 bool local_tcp_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
 #if 0
     std::stringstream msg;
@@ -181,14 +177,6 @@ bool local_tcp_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _seq
     its_connection->send_queued(_sequence);
 
     return true;
-}
-
-bool local_tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
-
-    (void)_target;
-    (void)_data;
-    (void)_size;
-    return false;
 }
 
 bool local_tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {

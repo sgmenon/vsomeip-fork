@@ -353,19 +353,6 @@ void udp_server_endpoint_impl::receive_multicast_unlocked(std::shared_ptr<messag
     }
 }
 
-bool udp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
-    // The caller shall not hold the sync_ lock
-    // But the mutex_ must be locked for the call to send_intern
-
-    std::scoped_lock its_lock(mutex_);
-    bool result = false;
-    if (_target) {
-        endpoint_type its_target(_target->get_address(), _target->get_port());
-        result = send_intern(its_target, _data, _size);
-    }
-    return result;
-}
-
 bool udp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
     std::scoped_lock its_lock(mutex_);
     bool result = false;

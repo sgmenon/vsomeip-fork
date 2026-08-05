@@ -148,12 +148,6 @@ void tcp_server_endpoint_impl::stop(bool /*_due_to_error*/) {
     VSOMEIP_INFO << instance_name_ << __func__ << ": done";
 }
 
-bool tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
-    std::lock_guard<std::mutex> its_lock(mutex_);
-    endpoint_type its_target(_target->get_address(), _target->get_port());
-    return send_intern(its_target, _data, _size);
-}
-
 bool tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
     std::lock_guard<std::mutex> its_lock(mutex_);
     endpoint_type its_target(_target->get_address(), _target->get_port());

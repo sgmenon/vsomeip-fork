@@ -24,6 +24,9 @@ typedef server_endpoint_impl<boost::asio::local::stream_protocol> local_uds_serv
 
 class local_uds_server_endpoint_impl : public local_uds_server_endpoint_base_impl {
 public:
+    using endpoint::send;
+    using endpoint::send_to;
+
     local_uds_server_endpoint_impl(const std::shared_ptr<endpoint_host>& _endpoint_host, const std::shared_ptr<routing_host>& _routing_host,
                                    boost::asio::io_context& _io, const std::shared_ptr<configuration>& _configuration,
                                    bool _is_routing_endpoint);
@@ -40,10 +43,8 @@ public:
 
     // this overrides server_endpoint_impl::send to disable the nPDU feature
     // for local communication
-    bool send(const send_buffer_sequence_ptr_t& _sequence);
-    bool send(const uint8_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition>, const byte_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition>, const send_buffer_sequence_ptr_t& _sequence);
+    bool send(const send_buffer_sequence_ptr_t& _sequence) override;
+    bool send_to(const std::shared_ptr<endpoint_definition>, const send_buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     bool send_queued(const target_data_iterator_type _queue_iterator);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,

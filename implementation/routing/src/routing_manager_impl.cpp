@@ -958,7 +958,9 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                 if (is_request) {
                     its_target = ep_mgr_impl_->find_or_create_remote_client(its_service, _instance, _reliable);
                     if (its_target) {
-                        is_sent = its_e2e_sequence ? its_target->send(its_e2e_sequence) : its_target->send(_data, _size);
+                        auto its_sequence =
+                                its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
+                        is_sent = its_target->send(its_sequence);
                         if (is_sent) {
                             trace::header its_header;
                             if (its_header.prepare(its_target, true, _instance))
@@ -1025,18 +1027,12 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                                 }
 
                                 for (auto const& target : its_targets) {
+                                    auto its_sequence =
+                                            its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
                                     if (target->is_reliable()) {
-                                        if (its_e2e_sequence) {
-                                            its_tcp_server_endpoint->send_to(target, its_e2e_sequence);
-                                        } else {
-                                            its_tcp_server_endpoint->send_to(target, _data, _size);
-                                        }
+                                        its_tcp_server_endpoint->send_to(target, its_sequence);
                                     } else {
-                                        if (its_e2e_sequence) {
-                                            its_udp_server_endpoint->send_to(target, its_e2e_sequence);
-                                        } else {
-                                            its_udp_server_endpoint->send_to(target, _data, _size);
-                                        }
+                                        its_udp_server_endpoint->send_to(target, its_sequence);
                                     }
                                     has_sent = true;
                                 }
@@ -1064,7 +1060,9 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                             its_target = is_service_discovery ? (sd_info_ ? sd_info_->get_endpoint(false) : nullptr)
                                                               : its_info->get_endpoint(_reliable);
                             if (its_target) {
-                                is_sent = its_e2e_sequence ? its_target->send(its_e2e_sequence) : its_target->send(_data, _size);
+                                auto its_sequence =
+                                        its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
+                                is_sent = its_target->send(its_sequence);
                                 if (is_sent) {
                                     trace::header its_header;
                                     if (its_header.prepare(its_target, true, _instance))
@@ -1150,7 +1148,8 @@ bool routing_manager_impl::send_to(const std::shared_ptr<endpoint_definition>& _
     std::shared_ptr<endpoint> its_endpoint = ep_mgr_impl_->find_server_endpoint(_target->get_remote_port(), _target->is_reliable());
 
     if (its_endpoint) {
-        is_sent = its_endpoint->send_to(_target, _data, _size);
+        auto its_sequence = std::make_shared<send_buffer_sequence>(_data, _size);
+        is_sent = its_endpoint->send_to(_target, its_sequence);
         if (is_sent) {
             trace::header its_header;
             if (its_header.prepare(its_endpoint, true, _instance))
@@ -1180,11 +1179,8 @@ bool routing_manager_impl::send_via_sd(
                     _target->is_reliable());
 
     if (its_endpoint) {
-        if (its_e2e_sequence) {
-            is_sent = its_endpoint->send_to(_target, its_e2e_sequence);
-        } else {
-            is_sent = its_endpoint->send_to(_target, _data, _size);
-        }
+        auto its_sequence = its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
+        is_sent = its_endpoint->send_to(_target, its_sequence);
         if (is_sent && tc_->is_sd_enabled()) {
             const byte_t* its_trace_data = _data;
             uint32_t its_trace_size = _size;

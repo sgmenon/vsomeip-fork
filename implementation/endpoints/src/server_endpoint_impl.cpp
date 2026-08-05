@@ -142,11 +142,6 @@ void server_endpoint_impl<Protocol>::set_connected(bool _connected) {
 }
 
 template<typename Protocol>
-bool server_endpoint_impl<Protocol>::send(const uint8_t* _data, uint32_t _size) {
-    return send(std::make_shared<send_buffer_sequence>(_data, _size));
-}
-
-template<typename Protocol>
 bool server_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& _sequence) {
 #if 0
     std::stringstream msg;
@@ -215,11 +210,6 @@ bool server_endpoint_impl<Protocol>::send(const std::vector<byte_t>& _cmd_header
     (void)_data;
     (void)_size;
     return false;
-}
-
-template<typename Protocol>
-bool server_endpoint_impl<Protocol>::send_intern(endpoint_type _target, const byte_t* _data, uint32_t _size) {
-    return send_intern(_target, std::make_shared<send_buffer_sequence>(_data, _size));
 }
 
 template<typename Protocol>

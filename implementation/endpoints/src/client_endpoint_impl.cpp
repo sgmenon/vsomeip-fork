@@ -147,17 +147,6 @@ std::pair<send_buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
-
-    (void)_target;
-    (void)_data;
-    (void)_size;
-    VSOMEIP_ERROR << "Clients endpoints must not be used to "
-                  << "send to explicitely specified targets";
-    return false;
-}
-
-template<typename Protocol>
 bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
 
     (void)_target;
@@ -176,11 +165,6 @@ bool client_endpoint_impl<Protocol>::send_error(const std::shared_ptr<endpoint_d
     VSOMEIP_ERROR << "Clients endpoints must not be used to "
                   << "send errors to explicitly specified targets";
     return false;
-}
-
-template<typename Protocol>
-bool client_endpoint_impl<Protocol>::send(const uint8_t* _data, uint32_t _size) {
-    return send(std::make_shared<send_buffer_sequence>(_data, _size));
 }
 
 template<typename Protocol>
