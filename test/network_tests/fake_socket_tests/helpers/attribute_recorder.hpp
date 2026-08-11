@@ -24,8 +24,10 @@ template<typename Value>
 class attribute_recorder {
 public:
     void record(Value _value) {
-        auto const lock = std::scoped_lock(mtx_);
-        record_.push_back(_value);
+        {
+            auto const lock = std::scoped_lock(mtx_);
+            record_.push_back(_value);
+        }
         cv_.notify_all();
     }
 
@@ -38,11 +40,11 @@ public:
 
     template<typename Predicate>
     [[nodiscard]] bool wait_for(Predicate p, std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
-        auto lock = std::unique_lock(mtx_);
-        if (p(record_)) {
-            return true;
-        }
-        return cv_.wait_for(lock, timeout, [&] { return p(record_); });
+        auto lock = std::unique_lock(cv_mtx_);
+        return cv_.wait_for(lock, timeout, [&] {
+            auto const data_lock = std::scoped_lock(mtx_);
+            return p(record_);
+        });
     }
 
     [[nodiscard]] bool wait_for(Value const& _value, std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
@@ -69,7 +71,11 @@ public:
     }
 
 private:
-    mutable std::mutex mtx_;
+    // recursive: vsomeip may invoke handlers re-entrantly on the dispatch thread
+    // (e.g. nested state callbacks).
+    mutable std::recursive_mutex mtx_;
+    // Dedicated non-recursive mutex for condition_variable.
+    mutable std::mutex cv_mtx_;
     std::condition_variable cv_;
     std::vector<Value> record_;
 };

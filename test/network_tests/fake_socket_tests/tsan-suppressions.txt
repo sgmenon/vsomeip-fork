@@ -1,0 +1,7 @@
+# libtsan with gcc 11 / libstdc++ does not correctly track
+# pthread_cond_clockwait used by std::condition_variable::wait_for, which
+# produces false "double lock" (and related race) reports on the mutexes that
+# guard those waits. See https://github.com/google/sanitizers/issues/1259
+mutex:routing_manager_client.cpp
+mutex:application_impl.cpp
+race:application_impl.cpp

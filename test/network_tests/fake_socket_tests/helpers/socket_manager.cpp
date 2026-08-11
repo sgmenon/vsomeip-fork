@@ -22,39 +22,43 @@ void socket_manager::add(std::string const& app) {
 void socket_manager::clear_handler(std::string const& app) {
     std::vector<std::shared_ptr<fake_tcp_socket_handle>> handle_to_clear;
     std::vector<std::shared_ptr<fake_tcp_acceptor_handle>> acceptor_handle_to_clear;
+    // Destroy the io_stop_spy timer outside the lock: its destructor calls
+    // clear_handler again, which would otherwise double-lock mtx_.
+    std::unique_ptr<boost::asio::steady_timer> timer_to_destroy;
     {
         auto const lock = std::scoped_lock(mtx_);
         if (auto const it = timers_.find(app); it != timers_.end()) {
-            it->second->cancel();
+            timer_to_destroy = std::move(it->second);
+            timers_.erase(it);
         }
-        timers_.erase(app);
 
         auto const it_context = name_to_context_.find(app);
         if (it_context == name_to_context_.end()) {
-            return;
-        }
-        LOCAL_LOG << "clearing handler for io_context: " << it_context->second;
-        auto* io = it_context->second;
-        context_to_name_.erase(io);
-        name_to_context_.erase(app);
+            // Fall through to destroy any moved timer after unlock.
+        } else {
+            LOCAL_LOG << "clearing handler for io_context: " << it_context->second;
+            auto* io = it_context->second;
+            context_to_name_.erase(io);
+            name_to_context_.erase(app);
 
-        auto const it_fds = context_to_fd_.find(io);
-        if (it_fds == context_to_fd_.end()) {
-            return;
-        }
-        for (auto fd : it_fds->second) {
-            if (auto const it_handle = fd_to_handle_.find(fd); it_handle != fd_to_handle_.end()) {
-                if (auto handle = it_handle->second.lock(); handle) {
-                    handle_to_clear.push_back(handle);
+            auto const it_fds = context_to_fd_.find(io);
+            if (it_fds != context_to_fd_.end()) {
+                for (auto fd : it_fds->second) {
+                    if (auto const it_handle = fd_to_handle_.find(fd); it_handle != fd_to_handle_.end()) {
+                        if (auto handle = it_handle->second.lock(); handle) {
+                            handle_to_clear.push_back(handle);
+                        }
+                    } else if (auto const it_acc = fd_to_acceptor_states_.find(fd); it_acc != fd_to_acceptor_states_.end()) {
+                        if (auto handle = it_acc->second.lock(); handle) {
+                            acceptor_handle_to_clear.push_back(handle);
+                        }
+                    }
                 }
-            } else if (auto const it_acc = fd_to_acceptor_states_.find(fd); it_acc != fd_to_acceptor_states_.end()) {
-                if (auto handle = it_acc->second.lock(); handle) {
-                    acceptor_handle_to_clear.push_back(handle);
-                }
+                context_to_fd_.erase(io);
             }
         }
-        context_to_fd_.erase(io);
     }
+    timer_to_destroy.reset();
     for (auto& handle : handle_to_clear) {
         handle->clear_handler();
     }
@@ -70,15 +74,19 @@ void socket_manager::add_socket(std::weak_ptr<fake_tcp_socket_handle> _state, bo
             throw std::runtime_error("Exhausted fake file descriptors");
         }
         state->init(fd, weak_from_this());
-        auto app_name = [&]() -> std::string {
+        std::string app_name;
+        std::string app_to_arm;
+        {
             auto const lock = std::scoped_lock(mtx_);
             fd_to_handle_[fd] = _state;
-            try_add(_io, fd, "socket");
+            app_to_arm = try_add(_io, fd, "socket");
             if (auto const it_name = context_to_name_.find(_io); it_name != context_to_name_.end()) {
-                return it_name->second;
+                app_name = it_name->second;
             }
-            return "";
-        }();
+        }
+        if (!app_to_arm.empty()) {
+            arm_io_stop_spy(app_to_arm, _io);
+        }
         state->set_app_name(app_name);
     }
 }
@@ -95,15 +103,19 @@ void socket_manager::add_acceptor(std::weak_ptr<fake_tcp_acceptor_handle> _state
             throw std::runtime_error("Exhausted fake file descriptors");
         }
         state->init(fd, weak_from_this());
-        auto app_name = [&]() -> std::string {
+        std::string app_name;
+        std::string app_to_arm;
+        {
             auto const lock = std::scoped_lock(mtx_);
             fd_to_acceptor_states_[fd] = _state;
-            try_add(_io, fd, "acceptor");
+            app_to_arm = try_add(_io, fd, "acceptor");
             if (auto const it_name = context_to_name_.find(_io); it_name != context_to_name_.end()) {
-                return it_name->second;
+                app_name = it_name->second;
             }
-            return "";
-        }();
+        }
+        if (!app_to_arm.empty()) {
+            arm_io_stop_spy(app_to_arm, _io);
+        }
         state->set_app_name(app_name);
     }
 }
@@ -117,44 +129,82 @@ void socket_manager::add_acceptor(std::weak_ptr<fake_tcp_acceptor_handle> _state
  * managed by themself.
  */
 struct io_stop_spy {
-    io_stop_spy(std::weak_ptr<socket_manager> _sm, std::string _app_name) : sm_(std::move(_sm)), app_name_(std::move(_app_name)) { }
+    io_stop_spy(std::weak_ptr<socket_manager> _sm, std::string _app_name) :
+        sm_(std::move(_sm)), app_name_(std::move(_app_name)), armed_(std::make_shared<bool>(true)) { }
     io_stop_spy(io_stop_spy const&) = delete;
     io_stop_spy& operator=(io_stop_spy const&) = delete;
 
+    void disarm() {
+        if (armed_) {
+            *armed_ = false;
+        }
+    }
+
     ~io_stop_spy() {
-        if (auto sm = sm_.lock(); sm) {
-            LOCAL_LOG << "io_spy deleted, calling clear handler for: " << app_name_;
-            sm->clear_handler(app_name_);
+        if (armed_ && *armed_) {
+            if (auto sm = sm_.lock(); sm) {
+                LOCAL_LOG << "io_spy deleted, calling clear handler for: " << app_name_;
+                sm->clear_handler(app_name_);
+            }
         }
     }
     std::weak_ptr<socket_manager> sm_;
     std::string app_name_;
+    // Shared so a caller can disarm after the spy is moved into an asio handler.
+    std::shared_ptr<bool> armed_;
 };
 
-void socket_manager::try_add(boost::asio::io_context* _io, fd_t _fd, char const* _type) {
+std::string socket_manager::try_add(boost::asio::io_context* _io, fd_t _fd, char const* _type) {
     context_to_fd_[_io].push_back(_fd);
-    if (auto const it = context_to_name_.find(_io); it == context_to_name_.end()) {
-        for (auto& pair : name_to_context_) {
-            if (!pair.second) {
-                LOCAL_LOG << "connected: \"" << pair.first << "\" with io: " << _io;
-                pair.second = _io;
-                assignment_cv_.notify_all();
-                context_to_name_[_io] = pair.first;
-                LOCAL_LOG << "added fake fd: " << _fd << " (" << _type << ") to client: " << pair.first;
-
-                auto [it, _] = timers_.emplace(pair.first, std::make_unique<boost::asio::steady_timer>(*_io));
-                // ensure the timer does not really expire by waiting for the maximum time.
-                // This leads to a handler destruction in the clean-up of the io_context, which
-                // we need to know about to clean-up the handlers we stored in the fake_sockets,
-                // belonging to this very io_context
-                it->second->expires_at(boost::asio::steady_timer::time_point::max());
-                it->second->async_wait([spy = std::make_unique<io_stop_spy>(weak_from_this(), pair.first)](auto ec) {
-                    LOCAL_LOG << "[ERROR] io_spy timer expired. Reporting ec: " << ec.message() << " for app: " << spy->app_name_;
-                });
-            }
-        }
-    } else {
+    if (auto const it = context_to_name_.find(_io); it != context_to_name_.end()) {
         LOCAL_LOG << "added fake fd: " << _fd << " (" << _type << ") to client: " << it->second << " with context: " << _io;
+        return {};
+    }
+
+    for (auto& pair : name_to_context_) {
+        if (!pair.second) {
+            LOCAL_LOG << "connected: \"" << pair.first << "\" with io: " << _io;
+            pair.second = _io;
+            assignment_cv_.notify_all();
+            context_to_name_[_io] = pair.first;
+            LOCAL_LOG << "added fake fd: " << _fd << " (" << _type << ") to client: " << pair.first;
+
+            // Defer timer arming to the caller (after mtx_ is released). Never
+            // call async_wait under the lock: replacing/cancelling a handler
+            // destroys io_stop_spy, which re-enters clear_handler.
+            if (timers_.find(pair.first) == timers_.end()) {
+                return pair.first;
+            }
+            return {};
+        }
+    }
+    return {};
+}
+
+void socket_manager::arm_io_stop_spy(std::string const& _app, boost::asio::io_context* _io) {
+    auto spy = std::make_unique<io_stop_spy>(weak_from_this(), _app);
+    auto armed = spy->armed_;
+
+    // Build the timer without holding mtx_: expires_at/async_wait must not run
+    // while the socket_manager lock is held.
+    auto timer = std::make_unique<boost::asio::steady_timer>(*_io);
+    // ensure the timer does not really expire by waiting for the maximum time.
+    // This leads to a handler destruction in the clean-up of the io_context, which
+    // we need to know about to clean-up the handlers we stored in the fake_sockets,
+    // belonging to this very io_context
+    timer->expires_at(boost::asio::steady_timer::time_point::max());
+    timer->async_wait([spy = std::move(spy)](auto ec) {
+        LOCAL_LOG << "[ERROR] io_spy timer expired. Reporting ec: " << ec.message() << " for app: " << spy->app_name_;
+    });
+
+    {
+        auto const lock = std::scoped_lock(mtx_);
+        // Another thread may have armed or cleared this app meanwhile.
+        if (timers_.find(_app) != timers_.end() || name_to_context_.find(_app) == name_to_context_.end()) {
+            *armed = false; // abandoning: do not clear_handler on timer destruction
+            return;
+        }
+        timers_.emplace(_app, std::move(timer));
     }
 }
 
@@ -180,22 +230,23 @@ void socket_manager::remove_acceptor(fd_t _fd, boost::asio::ip::tcp::endpoint _e
 }
 
 void socket_manager::connect(boost::asio::ip::tcp::endpoint const& _ep, fake_tcp_socket_handle& _connecting, connect_handler _handler) {
+    std::optional<boost::system::error_code> early_error;
     auto acceptor = [&]() -> std::shared_ptr<fake_tcp_acceptor_handle> {
         auto const lock = std::scoped_lock(mtx_);
         auto const it = ep_to_acceptor_states_.find(_ep);
         if (it == ep_to_acceptor_states_.end()) {
-            _handler(boost::asio::error::make_error_code(boost::asio::error::host_unreachable));
+            early_error = boost::asio::error::make_error_code(boost::asio::error::host_unreachable);
             return nullptr;
         }
         auto acc = it->second.lock();
         if (!acc) {
-            _handler(boost::asio::error::make_error_code(boost::asio::error::host_unreachable));
+            early_error = boost::asio::error::make_error_code(boost::asio::error::host_unreachable);
             return nullptr;
         }
         auto acc_name = acc->get_app_name();
         if (auto const it = app_to_next_connection_errors_.find(acc_name); it != app_to_next_connection_errors_.end()) {
             if (auto& err = it->second; !err.empty()) {
-                _handler(*err.begin());
+                early_error = *err.begin();
                 err.erase(err.begin());
                 return nullptr;
             }
@@ -212,6 +263,11 @@ void socket_manager::connect(boost::asio::ip::tcp::endpoint const& _ep, fake_tcp
         }
         return acc;
     }();
+    if (early_error) {
+        // _handler already re-posts onto the connecting socket's io_context.
+        _handler(*early_error);
+        return;
+    }
     if (!acceptor) {
         return;
     }
@@ -284,9 +340,9 @@ void socket_manager::connect(boost::asio::ip::tcp::endpoint const& _ep, fake_tcp
 }
 
 [[nodiscard]] bool socket_manager::await_assignment(std::string const& _app, std::chrono::milliseconds _timeout) {
-
-    auto lock = std::unique_lock(mtx_);
+    auto lock = std::unique_lock(cv_mtx_);
     return assignment_cv_.wait_for(lock, _timeout, [&, this] {
+        auto const data_lock = std::scoped_lock(mtx_);
         auto const it = name_to_context_.find(_app);
         return it != name_to_context_.end() && it->second != nullptr;
     });
@@ -301,13 +357,21 @@ void socket_manager::fail_on_bind(std::string const& _app, bool fail) {
 }
 
 [[nodiscard]] bool socket_manager::await_connectable(std::string const& _app, std::chrono::milliseconds _timeout) {
-    auto lock = std::unique_lock(mtx_);
+    auto lock = std::unique_lock(cv_mtx_);
     return connectable_cv_.wait_for(lock, _timeout, [&, this] {
-        for (auto const& ep_ac : ep_to_acceptor_states_) {
-            if (auto const acceptor = ep_ac.second.lock(); acceptor) {
-                if (acceptor->get_app_name() == _app) {
-                    return acceptor->is_awaiting_connection();
+        std::vector<std::shared_ptr<fake_tcp_acceptor_handle>> acceptors;
+        {
+            auto const data_lock = std::scoped_lock(mtx_);
+            acceptors.reserve(ep_to_acceptor_states_.size());
+            for (auto const& ep_ac : ep_to_acceptor_states_) {
+                if (auto const acceptor = ep_ac.second.lock(); acceptor) {
+                    acceptors.push_back(acceptor);
                 }
+            }
+        }
+        for (auto const& acceptor : acceptors) {
+            if (acceptor->get_app_name() == _app) {
+                return acceptor->is_awaiting_connection();
             }
         }
         return false;
@@ -315,18 +379,25 @@ void socket_manager::fail_on_bind(std::string const& _app, bool fail) {
 }
 
 [[nodiscard]] bool socket_manager::await_connection(std::string const& _from, std::string const& _to, std::chrono::milliseconds _timeout) {
-    auto lock = std::unique_lock(mtx_);
+    auto lock = std::unique_lock(cv_mtx_);
     auto const cn = connection_name(_from, _to);
     return connection_cv_.wait_for(lock, _timeout, [&, this] {
-        auto const it = app_names_to_connection.find(cn);
-        if (it == app_names_to_connection.end()) {
-            return false;
+        std::weak_ptr<fake_tcp_socket_handle> weak_from;
+        std::weak_ptr<fake_tcp_socket_handle> weak_to;
+        {
+            auto const data_lock = std::scoped_lock(mtx_);
+            auto const it = app_names_to_connection.find(cn);
+            if (it == app_names_to_connection.end()) {
+                return false;
+            }
+            weak_from = it->second.first;
+            weak_to = it->second.second;
         }
-        auto const from = it->second.first.lock();
+        auto const from = weak_from.lock();
         if (!from) {
             return false;
         }
-        return from->is_connected(it->second.second);
+        return from->is_connected(weak_to);
     });
 }
 

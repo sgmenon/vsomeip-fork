@@ -13,6 +13,13 @@ filegroup(
     srcs = ["conf/multiple_client_one_process.json.in"],
 )
 
+# Suppress known libtsan + libstdc++ wait_for false positives (see file).
+filegroup(
+    name = "tsan_suppressions",
+    testonly = True,
+    srcs = ["tsan-suppressions.txt"],
+)
+
 cc_test(
     name = "fake_socket_tests",
     srcs = glob([
@@ -21,9 +28,14 @@ cc_test(
         "helpers/*.hpp",
     ]),
     # use_configuration() setenv(..., overwrite=0), so a pre-set path wins.
-    data = [":fake_socket_configs"],
+    data = [
+        ":fake_socket_configs",
+        ":tsan_suppressions",
+    ],
     env = {
         "VSOMEIP_CONFIGURATION": "$(rootpath :fake_socket_configs)",
+        # Overrides --config=tsan action_env; keep halt_on_error and add suppressions.
+        "TSAN_OPTIONS": "verbosity=3:halt_on_error=1:second_deadlock_stack=1:suppressions=$(rootpath :tsan_suppressions)",
     },
     includes = [
         ".",
