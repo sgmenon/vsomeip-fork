@@ -1,37 +1,23 @@
 #!/usr/bin/env bash
-# Stage one E2E suite. Caller is a suite setup.sh; SUITE_DIR is that suite.
-# Expects CLIENT_BIN, SERVICE_BIN, CLIENT_CFG, SERVICE_CFG, PKG_DIR exported.
+# Stage one E2E suite from its pkg_tar into PKG_DIR.
+# Caller (e2e_*/setup.sh) must export SUITE_DIR; run-test.sh exports PKG_DIR + PACKAGE_TAR.
 set -euo pipefail
 
 SUITE_DIR="${SUITE_DIR:?SUITE_DIR must be set to the suite directory}"
 COMMON_DIR="$(cd "${SUITE_DIR}/../e2e_common" && pwd)"
-REPO_ROOT="$(cd "${SUITE_DIR}/../../../.." && pwd)"
 PKG_DIR="${PKG_DIR:?PKG_DIR must be set}"
+PACKAGE_TAR="${PACKAGE_TAR:?PACKAGE_TAR must be set (run-test.sh builds or --package)}"
 
-CLIENT_BIN="${CLIENT_BIN:?}"
-SERVICE_BIN="${SERVICE_BIN:?}"
-CLIENT_CFG="${CLIENT_CFG:?}"
-SERVICE_CFG="${SERVICE_CFG:?}"
+if [[ ! -f "${PACKAGE_TAR}" ]]; then
+    echo "setup.sh: package tar missing: ${PACKAGE_TAR}" >&2
+    exit 1
+fi
 
-STAGE_BINS=(
-    "test/network_tests/e2e_tests/${CLIENT_BIN}"
-    "test/network_tests/e2e_tests/${SERVICE_BIN}"
-)
-
-# shellcheck disable=SC1091
-source "${SUITE_DIR}/../lib/stage-vsomeip-libs.sh"
-
-cp "${SUITE_DIR}/configs/${CLIENT_CFG}" "${PKG_DIR}/configs/"
-cp "${SUITE_DIR}/configs/${SERVICE_CFG}" "${PKG_DIR}/configs/"
-cp "${COMMON_DIR}/run-master.sh" "${PKG_DIR}/app/run-master.sh"
-cp "${COMMON_DIR}/run-slave.sh" "${PKG_DIR}/app/run-slave.sh"
-chmod +x "${PKG_DIR}/app/run-master.sh" "${PKG_DIR}/app/run-slave.sh"
-
-cp -r "${SUITE_DIR}/../docker_infra" "${PKG_DIR}/docker_infra"
-chmod +x "${PKG_DIR}/docker_infra/entrypoint.sh"
+mkdir -p "${PKG_DIR}"
+tar -xf "${PACKAGE_TAR}" -C "${PKG_DIR}"
 
 # run-test.sh looks for ${TEST_DIR}/docker-compose.yml
 cp "${COMMON_DIR}/docker-compose.yml" "${SUITE_DIR}/docker-compose.yml"
 
-echo "setup.sh: staged ${CLIENT_BIN} / ${SERVICE_BIN} into ${PKG_DIR}/app"
-ls -la "${PKG_DIR}/app" "${PKG_DIR}/app/lib" | sed 's/^/  /'
+echo "setup.sh: extracted $(basename "${PACKAGE_TAR}") into ${PKG_DIR}"
+ls -la "${PKG_DIR}/app" "${PKG_DIR}/app/lib" "${PKG_DIR}/configs" | sed 's/^/  /'

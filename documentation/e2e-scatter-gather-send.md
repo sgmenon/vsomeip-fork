@@ -33,7 +33,7 @@ had to change together.
 Receive is intentionally boring. Datagrams and TCP streams already
 reassemble to contiguous memory; `check()` and strip stay on that path.
 
-## 2. What changed (short version)
+## 2. What changed
 
 | Layer | Before | After |
 |---|---|---|
@@ -159,15 +159,12 @@ bazel test //test/network_tests/fake_socket_tests:fake_socket_tests
 ./test/network_tests/docker_tests/run-test.sh e2e_p07
 ```
 
+CI: [`.github/workflows/e2e_docker_tests.yml`](../.github/workflows/e2e_docker_tests.yml)
+builds `//test/network_tests/docker_tests:e2e_pkgs` once (per-suite
+`pkg_tar`), then runs those three suites in a matrix with `--package`.
+
 See also [`test/network_tests/docker_tests/README.md`](../test/network_tests/docker_tests/README.md).
 
-## 9. Mainline ask
+## 9. Follow-ups 
 
-Land the stock path as the default E2E send model:
-
-1. Public protect API is `protect_parts` only.
-2. Endpoint send prefers `send_buffer_sequence`.
-3. Document the hole-free app contract (this file + configuration guide).
-
-Optional follow-ups that need not block the merge: train-batching stress
-without E2E, SecOC plugins on the same contract, TP without `flatten()`.
+Optional follow-ups: train-batching stress without E2E, SecOC plugins on the same contract, TP without `flatten()`.

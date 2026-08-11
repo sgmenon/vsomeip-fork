@@ -2,14 +2,14 @@
 # Host Bazel build + Docker Compose runner for vsomeip network tests.
 #
 # Pattern (Cruise-style):
-#   1. bazel build the suite binaries on the host
-#   2. stage them into /tmp/vsomeip-docker/<suite> via setup.sh
+#   1. bazel build a suite pkg_tar (or legacy binary targets)
+#   2. stage into /tmp/vsomeip-docker/<suite>
 #   3. docker compose up thin Ubuntu images with fixed IPs + multicast
 #   4. docker wait on the verdict container
 #
 # Usage:
-#   ./run-test.sh event_test
-#   ./run-test.sh event_test --skip-build
+#   ./run-test.sh e2e_crc
+#   ./run-test.sh e2e_crc --package /path/to/e2e_crc_pkg.tar
 #   ./run-test.sh event_test --timeout 180
 
 set -euo pipefail
@@ -24,13 +24,15 @@ else
     SUDO=
 fi
 
-SKIP_BUILD=false
 OVERRIDE_TIMEOUT=""
+PACKAGE_TAR=""
 TEST_NAME=""
 
 usage() {
     cat <<EOF
-Usage: $0 <test-name> [--skip-build] [--timeout SECONDS]
+Usage: $0 <test-name> [--package TAR] [--timeout SECONDS]
+
+  --package TAR   Use a pre-built suite tar (skips bazel). Preferred for CI.
 
 Available tests:
 $(for d in "${SCRIPT_DIR}"/*/; do
@@ -39,9 +41,17 @@ done)
 EOF
 }
 
+label_to_tar_path() {
+    local label="$1"
+    label="${label#//}"
+    local pkg="${label%%:*}"
+    local name="${label##*:}"
+    echo "${REPO_ROOT}/bazel-bin/${pkg}/${name}.tar"
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --skip-build) SKIP_BUILD=true; shift ;;
+        --package) PACKAGE_TAR="$2"; shift 2 ;;
         --timeout) OVERRIDE_TIMEOUT="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         -*)
@@ -86,7 +96,6 @@ export PKG_DIR
 TIMEOUT="${OVERRIDE_TIMEOUT:-${TIMEOUT:-90}}"
 WAIT_CONTAINER="${WAIT_CONTAINER:?WAIT_CONTAINER must be set in test.env}"
 BRIDGE_NAME="${BRIDGE_NAME:?BRIDGE_NAME must be set in test.env}"
-BAZEL_TARGETS="${BAZEL_TARGETS:?BAZEL_TARGETS must be set in test.env}"
 
 echo "=== vsomeip Docker network test: ${TEST_NAME} ==="
 echo "  Timeout:    ${TIMEOUT}s"
@@ -94,7 +103,27 @@ echo "  Bridge:     ${BRIDGE_NAME}"
 echo "  Pkg dir:    ${PKG_DIR}"
 echo "  Wait on:    ${WAIT_CONTAINER}"
 
-if [[ "${SKIP_BUILD}" = false ]]; then
+# Prefer pkg_tar packaging (E2E suites). Fall back to legacy BAZEL_TARGETS
+# + setup.sh staging (event_test).
+if [[ -n "${PACKAGE_TAR}" ]]; then
+    if [[ ! -f "${PACKAGE_TAR}" ]]; then
+        echo "FAIL: --package not found: ${PACKAGE_TAR}" >&2
+        exit 1
+    fi
+elif [[ -n "${PACKAGE_TARGET:-}" ]]; then
+    echo ""
+    echo "--- bazel build ${PACKAGE_TARGET} ---"
+    cd "${REPO_ROOT}"
+    if ! bazel build "${PACKAGE_TARGET}"; then
+        echo "FAIL: bazel build failed" >&2
+        exit 1
+    fi
+    PACKAGE_TAR="$(label_to_tar_path "${PACKAGE_TARGET}")"
+    if [[ ! -f "${PACKAGE_TAR}" ]]; then
+        echo "FAIL: package tar missing at ${PACKAGE_TAR}" >&2
+        exit 1
+    fi
+elif [[ -n "${BAZEL_TARGETS:-}" ]]; then
     echo ""
     echo "--- bazel build ---"
     cd "${REPO_ROOT}"
@@ -103,6 +132,9 @@ if [[ "${SKIP_BUILD}" = false ]]; then
         echo "FAIL: bazel build failed" >&2
         exit 1
     fi
+else
+    echo "FAIL: test.env must set PACKAGE_TARGET (pkg_tar) or BAZEL_TARGETS (legacy)" >&2
+    exit 1
 fi
 
 echo ""
@@ -110,6 +142,7 @@ echo "--- staging package ---"
 ${SUDO} rm -rf "${PKG_DIR:?}" 2>/dev/null || true
 mkdir -p "${PKG_DIR}"
 export PKG_DIR
+export PACKAGE_TAR
 if ! bash "${TEST_DIR}/setup.sh"; then
     echo "FAIL: setup.sh failed" >&2
     exit 1

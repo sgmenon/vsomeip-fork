@@ -14,12 +14,13 @@
 #   //test/network_tests/header_factory_tests:header_factory_test
 #   //test/network_tests/configuration_tests:configuration_test
 #
-# Multi-host suites are NOT `bazel test` targets. Build on the host, then
-# run via Docker Compose:
-#   test/network_tests/docker_tests/run-test.sh event_test
+# Multi-host suites are NOT `bazel test` targets. Build a pkg_tar on the host,
+# then run via Docker Compose:
+#   bazel build //test/network_tests/docker_tests:e2e_pkgs
 #   test/network_tests/docker_tests/run-test.sh e2e_crc
 #   test/network_tests/docker_tests/run-test.sh e2e_p04
 #   test/network_tests/docker_tests/run-test.sh e2e_p07
+#   test/network_tests/docker_tests/run-test.sh event_test
 
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
