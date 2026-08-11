@@ -1,0 +1,21 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+cc_binary(
+    name = "routingmanagerd",
+    srcs = ["routingmanagerd.cpp"],
+    # Prefer the shared routing layer (libvsomeip3.so) so
+    # runtime_impl_apps.cpp's static registrar is actually mapped. Linking
+    # only `:vsomeip-lib` as an archive lets the linker drop that TU when
+    # nothing references its symbols, and create_application then aborts.
+    linkopts = [
+        "-Wl,--no-as-needed",
+        "-Wl,-rpath,$$ORIGIN",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//:vsomeip",
+        "//:vsomeip-sd",
+    ],
+)

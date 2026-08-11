@@ -36,7 +36,7 @@ struct profile_config {
 
         :
         data_id_(_data_id), data_length_(_data_length), offset_(_offset), max_delta_counter_(_max_delta_counter),
-        base_(VSOMEIP_SOMEIP_HEADER_SIZE) { }
+        base_(VSOMEIP_FULL_HEADER_SIZE) { }
     profile_config(const profile_config& _config) = default;
     profile_config& operator=(const profile_config& _config) = default;
 

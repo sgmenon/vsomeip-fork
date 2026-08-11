@@ -4,8 +4,12 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <iomanip>
+#include <algorithm>
+#include <memory>
+#include <mutex>
 
 #include <vsomeip/internal/logger.hpp>
+#include "../../../../include/crc/crc.hpp"
 #include "../../../../include/e2e/profile/profile07/protector.hpp"
 #include "../../../../../utility/include/bithelper.hpp"
 
@@ -38,6 +42,49 @@ void protector::protect(e2e_buffer& _buffer, instance_t _instance) {
         /** @req [SWS_E2E_00494] */
         increment_counter(_instance);
     }
+}
+
+protect_result protector::protect_parts(buffer_view _app_payload, instance_t _instance) {
+    std::unique_lock<std::mutex> lock(protect_mutex_);
+
+    const std::size_t protected_size = 20 + _app_payload.data_length();
+
+    if (config_.offset_ != 0) {
+        e2e_buffer its_buffer(config_.offset_ + protected_size, 0);
+        std::copy(_app_payload.begin(), _app_payload.end(), its_buffer.begin() + config_.offset_ + 20);
+        lock.unlock();
+        protect(its_buffer, _instance);
+
+        protect_result its_result;
+        its_result.contiguous = std::make_shared<e2e_buffer>(std::move(its_buffer));
+        its_result.valid = true;
+        return its_result;
+    }
+
+    if (protected_size < config_.min_data_length_ || protected_size > config_.max_data_length_) {
+        return protect_result{};
+    }
+
+    auto its_header = std::make_shared<e2e_buffer>(20, 0);
+    bithelper::write_uint32_be(static_cast<uint16_t>(protected_size), &(*its_header)[PROFILE_07_SIZE_OFFSET]);
+    bithelper::write_uint32_be(get_counter(_instance), &(*its_header)[PROFILE_07_COUNTER_OFFSET]);
+    bithelper::write_uint32_be(config_.data_id_, &(*its_header)[PROFILE_07_DATAID_OFFSET]);
+
+    e2e_buffer its_after;
+    its_after.insert(its_after.end(), its_header->begin() + PROFILE_07_SIZE_OFFSET, its_header->end());
+    its_after.insert(its_after.end(), _app_payload.begin(), _app_payload.end());
+
+    // Same as profile_07::compute_crc with offset_ == 0: empty prefix, then bytes after CRC.
+    uint64_t its_crc = e2e_crc::calculate_profile_07(buffer_view(its_after));
+    bithelper::write_uint64_be(its_crc, &(*its_header)[PROFILE_07_CRC_OFFSET]);
+
+    increment_counter(_instance);
+
+    protect_result its_result;
+    its_result.e2e_header = its_header;
+    its_result.app_payload = std::make_shared<e2e_buffer>(_app_payload.begin(), _app_payload.end());
+    its_result.valid = true;
+    return its_result;
 }
 
 bool protector::verify_inputs(e2e_buffer& _buffer) {

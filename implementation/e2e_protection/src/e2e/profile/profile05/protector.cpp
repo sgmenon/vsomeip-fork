@@ -4,8 +4,12 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <iomanip>
+#include <algorithm>
+#include <memory>
+#include <mutex>
 
 #include <vsomeip/internal/logger.hpp>
+#include "../../../../include/crc/crc.hpp"
 #include "../../../../include/e2e/profile/profile05/protector.hpp"
 #include "../../../../../utility/include/bithelper.hpp"
 
@@ -36,6 +40,60 @@ void protector::protect(e2e_buffer& _buffer, instance_t _instance) {
         // E2E_P05Protect()),
         increment_counter(_instance);
     }
+}
+
+protect_result protector::protect_parts(buffer_view _app_payload, instance_t _instance) {
+    std::unique_lock<std::mutex> lock(protect_mutex_);
+
+    if (_instance > VSOMEIP_E2E_PROFILE05_MAX_INSTANCE) {
+        VSOMEIP_ERROR << "E2E Profile 5 can only be used for instances [1-255]";
+        return protect_result{};
+    }
+
+    const std::size_t protected_size = 3 + _app_payload.data_length();
+
+    if (config_.offset_ != 0) {
+        e2e_buffer its_buffer(config_.offset_ + protected_size, 0);
+        std::copy(_app_payload.begin(), _app_payload.end(), its_buffer.begin() + config_.offset_ + 3);
+        lock.unlock();
+        protect(its_buffer, _instance);
+
+        protect_result its_result;
+        its_result.contiguous = std::make_shared<e2e_buffer>(std::move(its_buffer));
+        its_result.valid = true;
+        return its_result;
+    }
+
+    e2e_buffer its_length_check(protected_size);
+    if (!profile_05::is_buffer_length_valid(config_, its_length_check)) {
+        return protect_result{};
+    }
+
+    const uint8_t its_counter = get_counter(_instance);
+    auto its_header = std::make_shared<e2e_buffer>(3, 0);
+    (*its_header)[2] = its_counter;
+
+    e2e_buffer its_after;
+    its_after.push_back(its_counter);
+    its_after.insert(its_after.end(), _app_payload.begin(), _app_payload.end());
+
+    // Same as profile_05::compute_crc with offset_ == 0: empty prefix, then counter||payload, then data_id.
+    uint16_t its_crc = e2e_crc::calculate_profile_05(buffer_view(its_after));
+
+    uint8_t data_id[2];
+    data_id[0] = static_cast<uint8_t>((config_.data_id_ >> 0) & 0xFF);
+    data_id[1] = static_cast<uint8_t>((config_.data_id_ >> 8) & 0xFF);
+    its_crc = e2e_crc::calculate_profile_05(buffer_view(data_id, sizeof(data_id)), its_crc);
+
+    bithelper::write_uint16_be(its_crc, &(*its_header)[0]);
+
+    increment_counter(_instance);
+
+    protect_result its_result;
+    its_result.e2e_header = its_header;
+    its_result.app_payload = std::make_shared<e2e_buffer>(_app_payload.begin(), _app_payload.end());
+    its_result.valid = true;
+    return its_result;
 }
 
 void protector::write_counter(e2e_buffer& _buffer, uint8_t _data, size_t _index) {

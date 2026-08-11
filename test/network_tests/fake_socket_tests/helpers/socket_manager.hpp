@@ -198,12 +198,22 @@ public:
     void awaiting();
 
 private:
-    void try_add(boost::asio::io_context* _io, fd_t _fd, char const* _type);
+    // Associates _io/_fd with an app name. If a new io_stop_spy timer must be
+    // armed, returns that app name; otherwise returns empty. Caller must arm
+    // the timer *after* releasing mtx_ (async_wait handler lifetime can re-enter
+    // clear_handler via io_stop_spy).
+    [[nodiscard]] std::string try_add(boost::asio::io_context* _io, fd_t _fd, char const* _type);
+    void arm_io_stop_spy(std::string const& _app, boost::asio::io_context* _io);
 
     std::pair<std::weak_ptr<fake_tcp_socket_handle>, std::weak_ptr<fake_tcp_socket_handle>> get_connection(std::string const& _from,
                                                                                                            std::string const& _to);
 
-    std::mutex mtx_;
+    // recursive: asio timer cancel/destruction can run io_stop_spy::~io_stop_spy
+    // (which calls clear_handler) while a socket_manager method already holds mtx_.
+    std::recursive_mutex mtx_;
+    // Dedicated non-recursive mutex for condition_variable (which cannot use
+    // recursive_mutex). Notifications do not need to hold this lock.
+    std::mutex cv_mtx_;
     std::condition_variable assignment_cv_;
     std::condition_variable connectable_cv_;
     std::condition_variable connection_cv_;

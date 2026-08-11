@@ -1,0 +1,46 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# Bazel binaries for the multi-host event_test suite. Runtime orchestration
+# lives under //test/network_tests/docker_tests/event_test (host bazel build
+# + thin Docker Compose), not under `bazel test`.
+
+load("@rules_cc//cc:cc_binary.bzl", "cc_binary")
+
+package(default_visibility = ["//test/network_tests:__subpackages__"])
+
+_COMMON_DEPS = [
+    "//:vsomeip",
+    "//:vsomeip-sd",
+    "//test/common:vsomeip_utilities",
+    "//test/network_tests:someip_test_globals",
+    "@googletest//:gtest",
+]
+
+_COMMON_LINKOPTS = [
+    "-Wl,--no-as-needed",
+    "-Wl,-rpath,$$ORIGIN",
+]
+
+cc_binary(
+    name = "event_test_client",
+    testonly = True,
+    srcs = [
+        "event_test_client.cpp",
+        "event_test_globals.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)
+
+cc_binary(
+    name = "event_test_service",
+    testonly = True,
+    srcs = [
+        "event_test_service.cpp",
+        "event_test_globals.hpp",
+    ],
+    includes = ["."],
+    linkopts = _COMMON_LINKOPTS,
+    deps = _COMMON_DEPS,
+)

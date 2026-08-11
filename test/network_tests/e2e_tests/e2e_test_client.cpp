@@ -111,9 +111,9 @@ void e2e_test_client::on_message(const std::shared_ptr<vsomeip::message>& _respo
         VSOMEIP_INFO << "Method ID 0x8421 -> IS_VALID_CRC 8 = " << std::hex << _response->is_valid_crc();
         EXPECT_EQ(true, _response->is_valid_crc());
 
-        // check if payload is as expected as well (including CRC / counter / data ID nibble)
+        // hole-free app payload (E2E framing stripped by routing)
         std::shared_ptr<vsomeip::payload> pl = _response->get_payload();
-        uint8_t* dataptr = pl->get_data(); // start after length field
+        uint8_t* dataptr = pl->get_data();
         for (uint32_t i = 0; i < pl->get_length(); i++) {
             EXPECT_EQ(dataptr[i],
                       payloads_profile_01_[received_responses_counters_[vsomeip_test::TEST_SERVICE_METHOD_ID]
@@ -121,27 +121,22 @@ void e2e_test_client::on_message(const std::shared_ptr<vsomeip::message>& _respo
         }
         received_responses_counters_[vsomeip_test::TEST_SERVICE_METHOD_ID]++;
     } else if (_response->get_message_type() == vsomeip::message_type_e::MT_NOTIFICATION && 0x8001 == _response->get_method()) {
-        // check CRC / payload calculated by sender for event 0x8001 against expected payload
-        // check for calculated CRC status OK for the calculated CRC / payload sent by service
         VSOMEIP_INFO << "Event ID 0x8001 -> IS_VALID_CRC 8 = " << std::hex << _response->is_valid_crc();
         EXPECT_EQ(true, _response->is_valid_crc());
 
-        // check if payload is as expected as well (including CRC / counter / data ID nibble)
         std::shared_ptr<vsomeip::payload> pl = _response->get_payload();
-        uint8_t* dataptr = pl->get_data(); // start after length field
+        uint8_t* dataptr = pl->get_data();
         for (uint32_t i = 0; i < pl->get_length(); i++) {
             EXPECT_EQ(dataptr[i],
                       event_payloads_profile_01_[received_responses_counters_[0x8001] % vsomeip_test::NUMBER_OF_MESSAGES_TO_SEND][i]);
         }
         received_responses_counters_[0x8001]++;
     } else if (_response->get_message_type() == vsomeip::message_type_e::MT_RESPONSE && 0x6543 == _response->get_method()) {
-        // check for calculated CRC status OK for the predefined fixed payload sent by service
         VSOMEIP_INFO << "Method ID 0x6543 -> IS_VALID_CRC 32 = " << std::hex << _response->is_valid_crc();
         EXPECT_EQ(true, _response->is_valid_crc());
 
-        // check if payload is as expected as well (including CRC / counter / data ID nibble)
         std::shared_ptr<vsomeip::payload> pl = _response->get_payload();
-        uint8_t* dataptr = pl->get_data(); // start after length field
+        uint8_t* dataptr = pl->get_data();
         for (uint32_t i = 0; i < pl->get_length(); i++) {
             EXPECT_EQ(dataptr[i],
                       payloads_custom_profile_[received_responses_counters_[0x6543] % vsomeip_test::NUMBER_OF_MESSAGES_TO_SEND][i]);
@@ -151,9 +146,8 @@ void e2e_test_client::on_message(const std::shared_ptr<vsomeip::message>& _respo
         VSOMEIP_INFO << "Event ID 0x8002 -> IS_VALID_CRC 32 = " << std::hex << _response->is_valid_crc();
         EXPECT_EQ(true, _response->is_valid_crc());
 
-        // check if payload is as expected as well (including CRC)
         std::shared_ptr<vsomeip::payload> pl = _response->get_payload();
-        uint8_t* dataptr = pl->get_data(); // start after length field
+        uint8_t* dataptr = pl->get_data();
         for (uint32_t i = 0; i < pl->get_length(); i++) {
             EXPECT_EQ(dataptr[i],
                       event_payloads_custom_profile_[received_responses_counters_[0x8002] % vsomeip_test::NUMBER_OF_MESSAGES_TO_SEND][i]);
@@ -235,16 +229,17 @@ int main(int argc, char** argv) {
     "data_length" : "56",
     "data_id" : "0xA73"
      */
-    payloads_profile_01_.push_back({{0x82, 0xa4, 0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}}); // initial event
-    payloads_profile_01_.push_back({{0x39, 0xa8, 0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x87, 0xa4, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x3c, 0xa8, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x55, 0xac, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x82, 0xa4, 0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x39, 0xa8, 0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x87, 0xa4, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x3c, 0xa8, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    payloads_profile_01_.push_back({{0x55, 0xac, 0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    // Hole-free app payloads after E2E strip (P01 fields occupy first 2 bytes on the wire)
+    payloads_profile_01_.push_back({{0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe3, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    payloads_profile_01_.push_back({{0xe7, 0xff, 0xff, 0xff, 0xff, 0xff}});
 
     /*
      e2e profile01 CRC8 protected payloads which shall be created by e2e module on
@@ -258,56 +253,54 @@ int main(int argc, char** argv) {
     "data_length" : "56",
     "data_id" : "0xA73"
      */
-    event_payloads_profile_01_.push_back({{0xa4, 0xa1, 0x00, 0xff, 0xff, 0xff, 0xff, 0xff}}); // initial event
-    event_payloads_profile_01_.push_back({{0x05, 0xa2, 0x01, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0x92, 0xa3, 0x02, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0x5a, 0xa4, 0x03, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0xc8, 0xa5, 0x04, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0x69, 0xa6, 0x05, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0xfe, 0xa7, 0x06, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0xe4, 0xa8, 0x07, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0x7c, 0xa9, 0x08, 0xff, 0xff, 0xff, 0xff, 0xff}});
-    event_payloads_profile_01_.push_back({{0xdd, 0xaa, 0x09, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x00, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x01, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x02, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x03, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x04, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x05, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x06, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x07, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x08, 0xff, 0xff, 0xff, 0xff, 0xff}});
+    event_payloads_profile_01_.push_back({{0x09, 0xff, 0xff, 0xff, 0xff, 0xff}});
 
     /*
-     e2e custom profile CRR32 protected fixed sample payloads sent by service
-     which must be received in client using the following config on client side:
+     e2e custom profile CRC32: hole-free after strip (4-byte CRC removed)
     "service_id" : "0x1234",
     "event_id" : "0x6543",
     "profile" : "CRC32",
     "variant" : "checker",
     "crc_offset" : "0"
      */
-    payloads_custom_profile_.push_back({{0xa4, 0xb2, 0x75, 0x1f, 0xff, 0x00, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa5, 0x70, 0x1f, 0x28, 0xff, 0x01, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa7, 0x36, 0xa1, 0x71, 0xff, 0x02, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa6, 0xf4, 0xcb, 0x46, 0xff, 0x03, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa3, 0xbb, 0xdd, 0xc3, 0xff, 0x04, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa2, 0x79, 0xb7, 0xf4, 0xff, 0x05, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa0, 0x3f, 0x09, 0xad, 0xff, 0x06, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xa1, 0xfd, 0x63, 0x9a, 0xff, 0x07, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xaa, 0xa1, 0x24, 0xa7, 0xff, 0x08, 0xff, 0x32}});
-    payloads_custom_profile_.push_back({{0xab, 0x63, 0x4e, 0x90, 0xff, 0x09, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x00, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x01, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x02, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x03, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x04, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x05, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x06, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x07, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x08, 0xff, 0x32}});
+    payloads_custom_profile_.push_back({{0xff, 0x09, 0xff, 0x32}});
 
     /*
-     e2e custom profile CRC32 protected payloads which shall be created by e2e module on
-     service side using the following config on client side for checking:
+     e2e custom profile CRC32 events: hole-free after strip
     "service_id" : "0x1234",
     "event_id" : "0x8002",
     "profile" : "CRC32",
     "variant" : "checker",
     "crc_offset" : "0"
      */
-    event_payloads_custom_profile_.push_back({{0x89, 0x0e, 0xbc, 0x80, 0xff, 0xff, 0x00, 0x32}});
-    event_payloads_custom_profile_.push_back({{0x90, 0x15, 0x8d, 0xc1, 0xff, 0xff, 0x01, 0x32}});
-    event_payloads_custom_profile_.push_back({{0xbb, 0x38, 0xde, 0x02, 0xff, 0xff, 0x02, 0x32}});
-    event_payloads_custom_profile_.push_back({{0xa2, 0x23, 0xef, 0x43, 0xff, 0xff, 0x03, 0x32}});
-    event_payloads_custom_profile_.push_back({{0xed, 0x62, 0x79, 0x84, 0xff, 0xff, 0x04, 0x32}});
-    event_payloads_custom_profile_.push_back({{0xf4, 0x79, 0x48, 0xc5, 0xff, 0xff, 0x05, 0x32}});
-    event_payloads_custom_profile_.push_back({{0xdf, 0x54, 0x1b, 0x06, 0xff, 0xff, 0x06, 0x32}});
-    event_payloads_custom_profile_.push_back({{0xc6, 0x4f, 0x2a, 0x47, 0xff, 0xff, 0x07, 0x32}});
-    event_payloads_custom_profile_.push_back({{0x41, 0xd7, 0x36, 0x88, 0xff, 0xff, 0x08, 0x32}});
-    event_payloads_custom_profile_.push_back({{0x58, 0xcc, 0x07, 0xc9, 0xff, 0xff, 0x09, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x00, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x01, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x02, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x03, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x04, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x05, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x06, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x07, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x08, 0x32}});
+    event_payloads_custom_profile_.push_back({{0xff, 0xff, 0x09, 0x32}});
 
     received_responses_counters_[vsomeip_test::TEST_SERVICE_METHOD_ID] = 0;
     received_responses_counters_[0x8001] = 0;

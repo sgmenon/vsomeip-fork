@@ -3,6 +3,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
+#include <array>
+#include <cstring>
 #include <deque>
 #include <iomanip>
 #include <sstream>
@@ -129,21 +131,37 @@ void local_tcp_server_endpoint_impl::stop(bool /*_due_to_error*/) {
     }
 }
 
-bool local_tcp_server_endpoint_impl::send(const uint8_t* _data, uint32_t _size) {
+bool local_tcp_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
 #if 0
     std::stringstream msg;
     msg << "lse(" << get_local_port() << ")::send ";
-    for (uint32_t i = 0; i < _size; i++)
-        msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(_data[i]) << " ";
+    for (const auto& buf : _sequence->storage()) {
+        if (!buf) {
+            continue;
+        }
+        for (byte_t b : *buf) {
+            msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(b) << " ";
+        }
+    }
     VSOMEIP_INFO << msg.str();
 #endif
+    if (!_sequence || _sequence->empty()) {
+        return false;
+    }
+
+    std::array<byte_t, sizeof(client_t)> its_client_bytes{};
+    for (std::size_t i = 0; i < its_client_bytes.size(); ++i) {
+        if (!_sequence->read_byte(protocol::COMMAND_HEADER_SIZE + i, its_client_bytes[i])) {
+            return false;
+        }
+    }
+    client_t its_client{};
+    std::memcpy(&its_client, its_client_bytes.data(), sizeof(its_client));
+
     std::scoped_lock its_lock{mutex_};
     if (endpoint_impl::sending_blocked_) {
         return false;
     }
-
-    client_t its_client;
-    std::memcpy(&its_client, &_data[protocol::COMMAND_HEADER_SIZE], sizeof(its_client));
 
     connection::ptr its_connection;
     {
@@ -156,18 +174,15 @@ bool local_tcp_server_endpoint_impl::send(const uint8_t* _data, uint32_t _size) 
         }
     }
 
-    auto its_buffer = std::make_shared<message_buffer_t>();
-    its_buffer->insert(its_buffer->end(), _data, _data + _size);
-    its_connection->send_queued(its_buffer);
+    its_connection->send_queued(_sequence);
 
     return true;
 }
 
-bool local_tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
+bool local_tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
 
     (void)_target;
-    (void)_data;
-    (void)_size;
+    (void)_sequence;
     return false;
 }
 
@@ -454,7 +469,7 @@ void local_tcp_server_endpoint_impl::connection::stop() {
     }
 }
 
-void local_tcp_server_endpoint_impl::connection::send_queued(const message_buffer_ptr_t& _buffer) {
+void local_tcp_server_endpoint_impl::connection::send_queued(const send_buffer_sequence_ptr_t& _sequence) {
 
     std::shared_ptr<local_tcp_server_endpoint_impl> its_server(server_.lock());
     if (!its_server) {
@@ -471,20 +486,28 @@ void local_tcp_server_endpoint_impl::connection::send_queued(const message_buffe
 #if 0
         std::stringstream msg;
         msg << "ltsei::sq: ";
-        for (std::size_t i = 0; i < _buffer->size(); i++)
-            msg << std::hex << std::setfill('0') << std::setw(2)
-                << static_cast<int>((*_buffer)[i]) << " ";
+        for (const auto& buf : _sequence->storage()) {
+            if (!buf) {
+                continue;
+            }
+            for (byte_t b : *buf) {
+                msg << std::hex << std::setfill('0') << std::setw(2)
+                    << static_cast<int>(b) << " ";
+            }
+        }
         VSOMEIP_INFO << msg.str();
 #endif
 
     bufs.push_back(boost::asio::buffer(its_start_tag));
-    bufs.push_back(boost::asio::buffer(*_buffer));
+    for (const auto& buf : _sequence->buffers()) {
+        bufs.push_back(buf);
+    }
     bufs.push_back(boost::asio::buffer(its_end_tag));
 
     {
         std::scoped_lock its_lock{socket_mutex_};
         socket_->async_write(bufs,
-                             std::bind(&local_tcp_server_endpoint_impl::connection::send_cbk, shared_from_this(), _buffer,
+                             std::bind(&local_tcp_server_endpoint_impl::connection::send_cbk, shared_from_this(), _sequence,
                                        std::placeholders::_1, std::placeholders::_2));
     }
 }
@@ -524,9 +547,9 @@ void local_tcp_server_endpoint_impl::get_configured_times_from_endpoint(service_
     VSOMEIP_ERROR << "ltsei::get_configured_times_from_endpoint." << " endpoint > " << this;
 }
 
-void local_tcp_server_endpoint_impl::connection::send_cbk(const message_buffer_ptr_t _buffer, boost::system::error_code const& _error,
+void local_tcp_server_endpoint_impl::connection::send_cbk(const send_buffer_sequence_ptr_t _sequence, boost::system::error_code const& _error,
                                                           std::size_t _bytes) {
-    (void)_buffer;
+    (void)_sequence;
     (void)_bytes;
     if (_error)
         VSOMEIP_WARNING << "ltsei::send_cbk received error: " << _error.message() << " endpoint > " << this;
@@ -990,7 +1013,7 @@ std::uint16_t local_tcp_server_endpoint_impl::get_local_port() const {
     return local_.port();
 }
 
-bool local_tcp_server_endpoint_impl::check_packetizer_space(message_buffer_ptr_t* _packetizer, std::uint32_t _size) const {
+bool local_tcp_server_endpoint_impl::check_packetizer_space(send_buffer_sequence_ptr_t* _packetizer, std::uint32_t _size) const {
     if ((*_packetizer)->size() + _size < (*_packetizer)->size()) {
         VSOMEIP_ERROR << "Overflow in packetizer addition ~> abort sending!";
         return false;
@@ -998,12 +1021,12 @@ bool local_tcp_server_endpoint_impl::check_packetizer_space(message_buffer_ptr_t
     return true;
 }
 
-bool local_tcp_server_endpoint_impl::queue_train_buffer(target_data_iterator_type _it, message_buffer_ptr_t* _packetizer,
+bool local_tcp_server_endpoint_impl::queue_train_buffer(target_data_iterator_type _it, send_buffer_sequence_ptr_t* _packetizer,
                                                         std::uint32_t _size) const {
     if ((*_packetizer)->size() + _size > max_message_size_ && !(*_packetizer)->empty()) {
         _it->second.queue_.push_back(std::make_pair(*_packetizer, 0));
         _it->second.queue_size_ += (*_packetizer)->size();
-        *_packetizer = std::make_shared<message_buffer_t>();
+        *_packetizer = std::make_shared<send_buffer_sequence>();
     }
     return true;
 }

@@ -1,0 +1,49 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# In-process configuration plugin / JSON parsing tests (no multi-host).
+# The binary hardcodes VSOMEIP_CONFIGURATION=configuration_test.json and
+# opens it relative to cwd, so a thin sh wrapper cds into the config dir.
+
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_test")
+
+# Ship the .in content as the runtime JSON (no @VAR@ substitutions).
+genrule(
+    name = "configuration_test_json",
+    srcs = ["conf/configuration_test.json.in"],
+    outs = ["configuration_test.json"],
+    cmd = "cp $< $@",
+)
+
+# DT_NEEDED libvsomeip3-cfg.so.3 so plugin_manager dlopen is a refcount bump.
+cc_import(
+    name = "vsomeip3-cfg-import",
+    shared_library = "//:vsomeip3-cfg",
+)
+
+cc_binary(
+    name = "configuration_test_bin",
+    testonly = True,
+    srcs = ["configuration_test.cpp"],
+    linkopts = [
+        "-Wl,--no-as-needed",
+        "-Wl,-rpath,$$ORIGIN",
+    ],
+    deps = [
+        ":vsomeip3-cfg-import",
+        "//:vsomeip-lib",
+        "//test/common:vsomeip_utilities",
+        "@googletest//:gtest",
+    ],
+)
+
+# Run from the directory that contains configuration_test.json.
+sh_test(
+    name = "configuration_test",
+    size = "small",
+    srcs = ["run_configuration_test.sh"],
+    data = [
+        ":configuration_test_bin",
+        ":configuration_test_json",
+    ],
+)

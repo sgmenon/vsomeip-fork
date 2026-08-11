@@ -73,8 +73,8 @@ private:
     void async_write(std::vector<boost::asio::const_buffer> const& bs, rw_handler handler) override {
         boost::asio::async_write(socket_, bs, std::move(handler));
     }
-    void async_write(boost::asio::const_buffer const& b, completion_condition cc, rw_handler handler) override {
-        boost::asio::async_write(socket_, b, std::move(cc), std::move(handler));
+    void async_write(std::vector<boost::asio::const_buffer> const& bs, completion_condition cc, rw_handler handler) override {
+        boost::asio::async_write(socket_, bs, std::move(cc), std::move(handler));
     }
 
     // needs to access the socket member to create a meaningful new connection

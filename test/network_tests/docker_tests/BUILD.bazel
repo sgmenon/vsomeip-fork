@@ -1,0 +1,84 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# Staging packages for Docker Compose network suites.
+# Build:  bazel build //test/network_tests/docker_tests:e2e_pkgs
+# Extract: tar -xf bazel-bin/.../<suite>_pkg.tar -C "$PKG_DIR"
+
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files", "strip_prefix")
+load("//test/network_tests/docker_tests:e2e_docker_pkg.bzl", "e2e_docker_pkg")
+
+package(default_visibility = ["//visibility:private"])
+
+# Shared vsomeip runtime / plugins for every E2E suite package.
+pkg_files(
+    name = "vsomeip_runtime_libs",
+    srcs = [
+        "//:vsomeip3",
+        "//:vsomeip3-core",
+        "//:vsomeip3-sd",
+        "//:vsomeip3-cfg",
+        "//:vsomeip3-e2e",
+    ],
+    prefix = "app/lib",
+    visibility = ["//visibility:private"],
+)
+
+pkg_files(
+    name = "e2e_common_scripts",
+    srcs = [
+        "e2e_common/run-master.sh",
+        "e2e_common/run-slave.sh",
+    ],
+    attributes = pkg_attributes(mode = "0755"),
+    prefix = "app",
+    renames = {
+        "e2e_common/run-master.sh": "run-master.sh",
+        "e2e_common/run-slave.sh": "run-slave.sh",
+    },
+)
+
+pkg_files(
+    name = "docker_infra_files",
+    srcs = [
+        "docker_infra/Dockerfile",
+        "docker_infra/entrypoint.sh",
+    ],
+    attributes = pkg_attributes(modes = {
+        "docker_infra/entrypoint.sh": "0755",
+    }),
+    prefix = "docker_infra",
+    strip_prefix = strip_prefix.from_pkg("docker_infra"),
+)
+
+e2e_docker_pkg(
+    name = "e2e_crc",
+    client = "//test/network_tests/e2e_tests:e2e_test_client",
+    config_srcs = glob(["e2e_crc/configs/*.json"]),
+    service = "//test/network_tests/e2e_tests:e2e_test_service",
+)
+
+e2e_docker_pkg(
+    name = "e2e_p04",
+    client = "//test/network_tests/e2e_tests:e2e_profile_04_test_client",
+    config_srcs = glob(["e2e_p04/configs/*.json"]),
+    service = "//test/network_tests/e2e_tests:e2e_profile_04_test_service",
+)
+
+e2e_docker_pkg(
+    name = "e2e_p07",
+    client = "//test/network_tests/e2e_tests:e2e_profile_07_test_client",
+    config_srcs = glob(["e2e_p07/configs/*.json"]),
+    service = "//test/network_tests/e2e_tests:e2e_profile_07_test_service",
+)
+
+# Convenience: build all E2E Docker staging tars in one bazel invocation.
+filegroup(
+    name = "e2e_pkgs",
+    testonly = True,
+    srcs = [
+        ":e2e_crc_pkg",
+        ":e2e_p04_pkg",
+        ":e2e_p07_pkg",
+    ],
+    visibility = ["//visibility:public"],
+)

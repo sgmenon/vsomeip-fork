@@ -24,6 +24,9 @@ typedef server_endpoint_impl<boost::asio::local::stream_protocol> local_uds_serv
 
 class local_uds_server_endpoint_impl : public local_uds_server_endpoint_base_impl {
 public:
+    using endpoint::send;
+    using endpoint::send_to;
+
     local_uds_server_endpoint_impl(const std::shared_ptr<endpoint_host>& _endpoint_host, const std::shared_ptr<routing_host>& _routing_host,
                                    boost::asio::io_context& _io, const std::shared_ptr<configuration>& _configuration,
                                    bool _is_routing_endpoint);
@@ -40,8 +43,8 @@ public:
 
     // this overrides server_endpoint_impl::send to disable the nPDU feature
     // for local communication
-    bool send(const uint8_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition>, const byte_t* _data, uint32_t _size);
+    bool send(const send_buffer_sequence_ptr_t& _sequence) override;
+    bool send_to(const std::shared_ptr<endpoint_definition>, const send_buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     bool send_queued(const target_data_iterator_type _queue_iterator);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
@@ -78,7 +81,7 @@ private:
         void start();
         void stop();
 
-        void send_queued(const message_buffer_ptr_t& _buffer);
+        void send_queued(const send_buffer_sequence_ptr_t& _sequence);
 
         void set_bound_client(client_t _client);
         client_t get_bound_client() const;
@@ -96,7 +99,7 @@ private:
         connection(const std::shared_ptr<local_uds_server_endpoint_impl>& _server, std::uint32_t _max_message_size,
                    std::uint32_t _initial_recv_buffer_size, std::uint32_t _buffer_shrink_threshold, boost::asio::io_context& _io);
 
-        void send_cbk(const message_buffer_ptr_t _buffer, boost::system::error_code const& _error, std::size_t _bytes);
+        void send_cbk(const send_buffer_sequence_ptr_t _sequence, boost::system::error_code const& _error, std::size_t _bytes);
         void receive_cbk(boost::system::error_code const& _error, std::size_t _bytes
 #if defined(__linux__) || defined(__QNX__)
                          ,
@@ -150,8 +153,8 @@ private:
     std::string get_remote_information(const target_data_iterator_type _queue_iterator) const;
     std::string get_remote_information(const endpoint_type& _remote) const;
 
-    bool check_packetizer_space(message_buffer_ptr_t* _packetizer, std::uint32_t _size) const;
-    bool queue_train_buffer(target_data_iterator_type _it, message_buffer_ptr_t* _packetizer, std::uint32_t _size) const;
+    bool check_packetizer_space(send_buffer_sequence_ptr_t* _packetizer, std::uint32_t _size) const;
+    bool queue_train_buffer(target_data_iterator_type _it, send_buffer_sequence_ptr_t* _packetizer, std::uint32_t _size) const;
     void send_client_identifier(const client_t& _client);
 };
 

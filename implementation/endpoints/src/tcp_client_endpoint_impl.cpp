@@ -88,10 +88,16 @@ void tcp_client_endpoint_impl::restart(bool _force) {
         {
             std::scoped_lock<std::recursive_mutex> its_lock(self->mutex_);
             for (const auto& q : self->queue_) {
-                const service_t its_service = bithelper::read_uint16_be(&(*q.first)[VSOMEIP_SERVICE_POS_MIN]);
-                const method_t its_method = bithelper::read_uint16_be(&(*q.first)[VSOMEIP_METHOD_POS_MIN]);
-                const client_t its_client = bithelper::read_uint16_be(&(*q.first)[VSOMEIP_CLIENT_POS_MIN]);
-                const session_t its_session = bithelper::read_uint16_be(&(*q.first)[VSOMEIP_SESSION_POS_MIN]);
+                service_t its_service(0);
+                method_t its_method(0);
+                client_t its_client(0);
+                session_t its_session(0);
+                if (q.first) {
+                    q.first->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+                    q.first->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+                    q.first->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+                    q.first->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
+                }
                 VSOMEIP_WARNING << "tce::restart: dropping message: "
                                 << "remote:" << self->get_address_port_remote() << " (" << std::hex << std::setfill('0') << std::setw(4)
                                 << its_client << "): [" << std::setw(4) << its_service << "." << std::setw(4) << its_method << "."
@@ -324,13 +330,17 @@ void tcp_client_endpoint_impl::receive(message_buffer_ptr_t _recv_buffer, std::s
     }
 }
 
-void tcp_client_endpoint_impl::send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry) {
+void tcp_client_endpoint_impl::send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) {
     std::scoped_lock its_lock{socket_mutex_};
 
-    const service_t its_service = bithelper::read_uint16_be(&(*_entry.first)[VSOMEIP_SERVICE_POS_MIN]);
-    const method_t its_method = bithelper::read_uint16_be(&(*_entry.first)[VSOMEIP_METHOD_POS_MIN]);
-    const client_t its_client = bithelper::read_uint16_be(&(*_entry.first)[VSOMEIP_CLIENT_POS_MIN]);
-    const session_t its_session = bithelper::read_uint16_be(&(*_entry.first)[VSOMEIP_SESSION_POS_MIN]);
+    service_t its_service = 0;
+    method_t its_method = 0;
+    client_t its_client = 0;
+    session_t its_session = 0;
+    _entry.first->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+    _entry.first->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+    _entry.first->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+    _entry.first->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
     if (use_magic_cookies_) {
         const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_cookie_sent_) > std::chrono::milliseconds(10000)) {
@@ -339,19 +349,10 @@ void tcp_client_endpoint_impl::send_queued(std::pair<message_buffer_ptr_t, uint3
         }
     }
 
-#if 0
-    std::stringstream msg;
-    msg << "tcei<" << remote_.address() << ":"
-        << std::dec << remote_.port()  << ">::sq: ";
-    for (std::size_t i = 0; i < _buffer->size(); i++)
-        msg << std::hex << std::setfill('0') << std::setw(2)
-            << static_cast<int>((*_entry.first)[i] << " ";
-    VSOMEIP_INFO << msg.str();
-#endif
     {
         if (socket_->is_open()) {
             socket_->async_write(
-                    boost::asio::buffer(*_entry.first),
+                    _entry.first->buffers(),
                     [this, self = shared_from_this(), to_be_send_length = _entry.first->size(), when = std::chrono::steady_clock::now(),
                      its_service, its_method, its_client, its_session](auto ec, auto size) {
                         // do not use self, as the shared_from_this is pointing to the base class
@@ -359,7 +360,7 @@ void tcp_client_endpoint_impl::send_queued(std::pair<message_buffer_ptr_t, uint3
                                                           when);
                     },
                     strand_.wrap(
-                            // copy the buffer into the callback to keep the buffer itself alive
+                            // keep the sequence alive until the write completes
                             [this, self = shared_from_this(), buffer = _entry.first](auto ec, auto size) { send_cbk(ec, size, buffer); }));
         } else {
             VSOMEIP_WARNING << "tcei::" << __func__ << ": try to send while socket was not open | endpoint > " << this;
@@ -435,10 +436,11 @@ bool tcp_client_endpoint_impl::is_magic_cookie(const message_buffer_ptr_t& _recv
     return (0 == std::memcmp(SERVICE_COOKIE, &(*_recv_buffer)[_offset], sizeof(SERVICE_COOKIE)));
 }
 
-void tcp_client_endpoint_impl::send_magic_cookie(message_buffer_ptr_t& _buffer) {
+void tcp_client_endpoint_impl::send_magic_cookie(send_buffer_sequence_ptr_t& _sequence) {
     if (max_message_size_ == MESSAGE_SIZE_UNLIMITED
-        || max_message_size_ - _buffer->size() >= VSOMEIP_SOMEIP_HEADER_SIZE + VSOMEIP_SOMEIP_MAGIC_COOKIE_SIZE) {
-        _buffer->insert(_buffer->begin(), CLIENT_COOKIE, CLIENT_COOKIE + sizeof(CLIENT_COOKIE));
+        || max_message_size_ - _sequence->size() >= VSOMEIP_SOMEIP_HEADER_SIZE + VSOMEIP_SOMEIP_MAGIC_COOKIE_SIZE) {
+        auto cookie = std::make_shared<message_buffer_t>(CLIENT_COOKIE, CLIENT_COOKIE + sizeof(CLIENT_COOKIE));
+        _sequence->prepend(std::move(cookie));
         queue_size_ += sizeof(CLIENT_COOKIE);
     } else {
         VSOMEIP_WARNING << "Packet full. Cannot insert magic cookie!";
@@ -776,7 +778,7 @@ std::string tcp_client_endpoint_impl::get_remote_information() const {
 }
 
 void tcp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                        const message_buffer_ptr_t& _sent_msg) {
+                                        const send_buffer_sequence_ptr_t& _sent_msg) {
     (void)_bytes;
 
     std::scoped_lock<std::recursive_mutex> its_lock(mutex_);
@@ -821,10 +823,10 @@ void tcp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
             client_t its_client(0);
             session_t its_session(0);
             if (_sent_msg && _sent_msg->size() > VSOMEIP_SESSION_POS_MAX) {
-                its_service = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SERVICE_POS_MIN]);
-                its_method = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_METHOD_POS_MIN]);
-                its_client = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_CLIENT_POS_MIN]);
-                its_session = bithelper::read_uint16_be(&(*_sent_msg)[VSOMEIP_SESSION_POS_MIN]);
+                _sent_msg->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
+                _sent_msg->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method);
+                _sent_msg->read_uint16_be(VSOMEIP_CLIENT_POS_MIN, its_client);
+                _sent_msg->read_uint16_be(VSOMEIP_SESSION_POS_MIN, its_session);
             }
             VSOMEIP_WARNING << "tce::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value() << ") "
                             << get_remote_information() << " " << std::dec << queue_.size() << " " << std::dec << queue_size_ << " ("

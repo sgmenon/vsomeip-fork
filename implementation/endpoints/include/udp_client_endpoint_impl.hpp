@@ -44,10 +44,10 @@ public:
     void print_status();
     bool is_reliable() const;
 
-    void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const message_buffer_ptr_t& _sent_msg);
+    void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const send_buffer_sequence_ptr_t& _sent_msg);
 
 private:
-    void send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry);
+    void send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
                                             std::chrono::nanoseconds* _maximum_retention) const;
     void connect();

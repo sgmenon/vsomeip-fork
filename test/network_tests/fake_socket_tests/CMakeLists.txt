@@ -22,6 +22,7 @@ add_executable(${PROJECT_NAME}
     helpers/to_string.cpp
     main.cpp
     test_connection_restoration.cpp
+    test_write_buffer_count.cpp
 )
 
 targets_link_default_libraries("${PROJECT_NAME}")

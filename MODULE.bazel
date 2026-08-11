@@ -5,7 +5,7 @@
 
 module(
     name = "vsomeip",
-    version = "3.6.1.sgm.1",
+    version = "3.6.1.sgm.2",
     compatibility_level = 1,
 )
 
@@ -44,6 +44,7 @@ bazel_dep(name = "fmt", version = "11.1.4")
 bazel_dep(name = "bazel-toolchains", version = "1.0.0", dev_dependency = True)
 bazel_dep(name = "aspect_bazel_lib", version = "2.22.5", dev_dependency = True)
 bazel_dep(name = "googletest", version = "1.16.0", dev_dependency = True)
+bazel_dep(name = "rules_pkg", version = "1.1.0", dev_dependency = True)
 
 archive_override(
     module_name = "bazel-toolchains",

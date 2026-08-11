@@ -235,6 +235,11 @@ void fake_tcp_socket_handle::clear_handler() {
 }
 
 void fake_tcp_socket_handle::write(std::vector<boost::asio::const_buffer> const& _buffer, rw_handler _handler) {
+    {
+        auto const lock = std::scoped_lock(mtx_);
+        last_write_buffer_count_ = _buffer.size();
+    }
+
     auto receiver = [&]() -> std::shared_ptr<fake_tcp_socket_handle> {
         auto const lock = std::scoped_lock(mtx_);
         return connected_socket_.lock();
@@ -355,6 +360,11 @@ fd_t fake_tcp_socket_handle::fd() {
     return socket_id_.fd_;
 }
 
+size_t fake_tcp_socket_handle::last_write_buffer_count() const {
+    auto const lock = std::scoped_lock(mtx_);
+    return last_write_buffer_count_;
+}
+
 fake_tcp_acceptor_handle::fake_tcp_acceptor_handle(boost::asio::io_context& _io) : io_(_io) { }
 
 fake_tcp_acceptor_handle::~fake_tcp_acceptor_handle() {
@@ -423,6 +433,7 @@ void fake_tcp_acceptor_handle::async_accept(tcp_socket& _socket, connect_handler
     }
 
     connect_handler handler{};
+    std::shared_ptr<socket_manager> sm;
     {
         auto lock = std::scoped_lock(mtx_);
         if (connection_) {
@@ -432,33 +443,43 @@ void fake_tcp_acceptor_handle::async_accept(tcp_socket& _socket, connect_handler
 
         TEST_LOG << "[fake-acceptor] fd: " << fd_ << ", is awaiting connections with fd: " << fake_socket->state_->fd();
         connection_ = connection{fake_socket->state_, std::move(_handler)};
-        if (auto const sm = socket_manager_.lock(); sm) {
-            sm->awaiting();
-        }
+        sm = socket_manager_.lock();
+    }
+    // Notify outside the acceptor lock: awaiting() may interact with
+    // socket_manager waiters that themselves lock acceptor state.
+    if (sm) {
+        sm->awaiting();
     }
 }
 
 [[nodiscard]] std::shared_ptr<fake_tcp_socket_handle> fake_tcp_acceptor_handle::connect(fake_tcp_socket_handle& _state,
                                                                                         connect_handler _handler) {
-    // because the socket_handle will never call the acceptor there is no risk of a dead-lock,
-    // in case the mutex of the acceptor is hold while invoking methods from a socket_handle.
-    auto const lock = std::scoped_lock(mtx_);
-    if (!connection_) {
-        _handler(boost::asio::error::make_error_code(boost::asio::error::host_unreachable));
-        return nullptr;
-    }
-    if (auto accepting_socket = connection_->socket_.lock(); accepting_socket) {
-        if (!accepting_socket->add_connection(_state)) {
-            _handler(boost::asio::error::make_error_code(boost::asio::error::host_unreachable));
-            return nullptr;
+    // Complete accept and connect asynchronously (like real sockets) so handlers never run
+    // while mtx_ is held. The connect_handler from fake_tcp_socket_handle::connect already
+    // re-posts onto the connecting socket's io_context.
+    connect_handler accept_handler;
+    std::shared_ptr<fake_tcp_socket_handle> accepting_socket;
+    auto ec = boost::asio::error::make_error_code(boost::asio::error::host_unreachable);
+
+    {
+        auto const lock = std::scoped_lock(mtx_);
+        if (connection_) {
+            accepting_socket = connection_->socket_.lock();
+            if (accepting_socket && accepting_socket->add_connection(_state)) {
+                accept_handler = std::move(connection_->handler_);
+                connection_ = std::nullopt;
+                ec = {};
+            } else {
+                accepting_socket = nullptr;
+            }
         }
-        boost::asio::post(io_, [handler = std::move(connection_->handler_)] { handler(boost::system::error_code()); });
-        _handler(boost::system::error_code());
-        connection_ = std::nullopt;
-        return accepting_socket;
     }
-    _handler(boost::asio::error::make_error_code(boost::asio::error::host_unreachable));
-    return nullptr;
+
+    if (!ec && accept_handler) {
+        boost::asio::post(io_, [handler = std::move(accept_handler)] { handler(boost::system::error_code()); });
+    }
+    boost::asio::post(io_, [handler = std::move(_handler), ec] { handler(ec); });
+    return accepting_socket;
 }
 void fake_tcp_acceptor_handle::clear_handler() {
     connect_handler handler;

@@ -40,14 +40,14 @@ public:
     bool is_local() const;
     void print_status();
 
-    void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const message_buffer_ptr_t& _sent_msg);
+    void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const send_buffer_sequence_ptr_t& _sent_msg);
 
 private:
-    void send_queued(std::pair<message_buffer_ptr_t, uint32_t>& _entry);
+    void send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
                                             std::chrono::nanoseconds* _maximum_retention) const;
     bool is_magic_cookie(const message_buffer_ptr_t& _recv_buffer, size_t _offset) const;
-    void send_magic_cookie(message_buffer_ptr_t& _buffer);
+    void send_magic_cookie(send_buffer_sequence_ptr_t& _sequence);
 
     void receive_cbk(boost::system::error_code const& _error, std::size_t _bytes, const message_buffer_ptr_t& _recv_buffer,
                      std::size_t _recv_buffer_size);

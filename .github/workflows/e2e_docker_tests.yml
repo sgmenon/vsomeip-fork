@@ -1,0 +1,76 @@
+# Bazel-built E2E binaries + Docker Compose multi-host suites.
+# One pkg_tar build job, then a matrix that only extracts + runs Compose.
+
+name: E2E Docker Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build E2E packages
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bazel build E2E pkg_tar targets
+        uses: ./.github/actions/bazel
+        with:
+          command: bazel build //test/network_tests/docker_tests:e2e_pkgs
+
+      - name: Upload suite tars
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-pkgs
+          path: |
+            bazel-bin/test/network_tests/docker_tests/e2e_crc_pkg.tar
+            bazel-bin/test/network_tests/docker_tests/e2e_p04_pkg.tar
+            bazel-bin/test/network_tests/docker_tests/e2e_p07_pkg.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  test:
+    name: ${{ matrix.suite }}
+    needs: build
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [e2e_crc, e2e_p04, e2e_p07]
+    steps:
+      - uses: actions/checkout@v4
+
+      # ubuntu-22.04 runners ship Docker Engine + Compose
+      # (https://github.com/actions/runner-images — Tools: Docker Client/Server, Docker Compose).
+      - name: Check Docker
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+
+      - name: Download suite tars
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-pkgs
+          path: e2e-pkgs
+
+      - name: Run ${{ matrix.suite }}
+        run: >
+          ./test/network_tests/docker_tests/run-test.sh ${{ matrix.suite }}
+          --package e2e-pkgs/${{ matrix.suite }}_pkg.tar
+
+      - name: Upload suite log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-docker-${{ matrix.suite }}
+          path: /tmp/vsomeip-docker/${{ matrix.suite }}/test.log
+          if-no-files-found: ignore

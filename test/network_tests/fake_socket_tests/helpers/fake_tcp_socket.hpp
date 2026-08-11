@@ -144,7 +144,9 @@ private:
         state_->write(_buffer, std::move(_handler));
     }
 
-    virtual void async_write(boost::asio::const_buffer const&, completion_condition, rw_handler) override { }
+    virtual void async_write(std::vector<boost::asio::const_buffer> const& _buffer, completion_condition, rw_handler _handler) override {
+        state_->write(_buffer, std::move(_handler));
+    }
 
     friend struct fake_tcp_acceptor_handle;
     std::shared_ptr<fake_tcp_socket_handle> state_;

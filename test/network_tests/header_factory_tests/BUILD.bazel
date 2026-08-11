@@ -1,0 +1,22 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# Pure in-process header/message factory checks (no network). The
+# send/receive multi-process case stays on the CMake/Docker path for now.
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "header_factory_test",
+    srcs = ["header_factory_test.cpp"],
+    linkopts = [
+        "-Wl,--no-as-needed",
+        "-Wl,-rpath,$$ORIGIN",
+    ],
+    deps = [
+        "//:vsomeip-lib",
+        "//:vsomeip-sd",
+        "//test/common:vsomeip_utilities",
+        "//test/network_tests:someip_test_globals",
+        "@googletest//:gtest",
+    ],
+)

@@ -46,16 +46,14 @@ void virtual_server_endpoint_impl::set_connected(bool _connected) {
     (void)_connected;
 }
 
-bool virtual_server_endpoint_impl::send(const byte_t* _data, uint32_t _size) {
-    (void)_data;
-    (void)_size;
+bool virtual_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
+    (void)_sequence;
     return false;
 }
 
-bool virtual_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
+bool virtual_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
     (void)_target;
-    (void)_data;
-    (void)_size;
+    (void)_sequence;
     return false;
 }
 

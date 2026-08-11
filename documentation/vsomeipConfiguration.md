@@ -1374,6 +1374,15 @@ Debounce time for requests to the service on 192.168.1.9 should have a:
 
 ## E2E
 
+> **Application payload contract.** When E2E protection is enabled for a
+> service/method, the application payload must be **hole-free user data
+> only**. vsomeip owns the E2E header buffer and inserts it on send
+> (scatter-gather). Do not pre-allocate placeholder bytes for the E2E
+> header — that double-sizes the protected area on the wire. On receive,
+> the application sees a hole-free payload again after check + strip.
+> Design notes:
+> [`e2e-scatter-gather-send.md`](./e2e-scatter-gather-send.md).
+
 - **e2e** - Used to configure the E2E protection for the specified events
     - **e2e_enabled** - Specifies if E2E protection should be enabled or disabled. Use `true` to enable.
     - **protected** - Specify the protected events

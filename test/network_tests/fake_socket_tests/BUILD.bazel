@@ -1,0 +1,58 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# In-process network tests that inject fake TCP sockets (no real NICs /
+# multi-host required). CMake equivalent:
+#   test/network_tests/fake_socket_tests/CMakeLists.txt
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+# JSON has no @VAR@ substitutions; ship the .in content as the runtime config.
+filegroup(
+    name = "fake_socket_configs",
+    testonly = True,
+    srcs = ["conf/multiple_client_one_process.json.in"],
+)
+
+# Suppress known libtsan + libstdc++ wait_for false positives (see file).
+filegroup(
+    name = "tsan_suppressions",
+    testonly = True,
+    srcs = ["tsan-suppressions.txt"],
+)
+
+cc_test(
+    name = "fake_socket_tests",
+    srcs = glob([
+        "*.cpp",
+        "helpers/*.cpp",
+        "helpers/*.hpp",
+    ]),
+    # use_configuration() setenv(..., overwrite=0), so a pre-set path wins.
+    data = [
+        ":fake_socket_configs",
+        ":tsan_suppressions",
+    ],
+    env = {
+        "VSOMEIP_CONFIGURATION": "$(rootpath :fake_socket_configs)",
+        # Overrides --config=tsan action_env; keep halt_on_error and add suppressions.
+        "TSAN_OPTIONS": "verbosity=3:halt_on_error=1:second_deadlock_stack=1:suppressions=$(rootpath :tsan_suppressions)",
+    },
+    includes = [
+        ".",
+        "helpers",
+    ],
+    # Keep libvsomeip3-sd.so.3 as DT_NEEDED even though the test never
+    # references an SD symbol directly — plugin_manager dlopens that soname.
+    linkopts = [
+        "-Wl,--no-as-needed",
+        "-Wl,-rpath,$$ORIGIN",
+    ],
+    deps = [
+        "//:vsomeip-lib",
+        "//:vsomeip-sd",
+        "//test/common:vsomeip_utilities",
+        "@boost.asio",
+        "@boost.system",
+        "@googletest//:gtest",
+    ],
+)

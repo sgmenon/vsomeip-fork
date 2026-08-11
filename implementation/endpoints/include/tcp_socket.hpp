@@ -66,7 +66,7 @@ public:
     virtual void async_receive(boost::asio::mutable_buffer, rw_handler) = 0;
     // usually the ConstBufferSequence is a template parameter
     virtual void async_write(std::vector<boost::asio::const_buffer> const&, rw_handler) = 0;
-    virtual void async_write(boost::asio::const_buffer const& b, completion_condition cc, rw_handler handler) = 0;
+    virtual void async_write(std::vector<boost::asio::const_buffer> const& bs, completion_condition cc, rw_handler handler) = 0;
 #if defined(__linux__)
     /**
      * abstraction for setting the linux specific tcp option

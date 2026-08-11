@@ -24,6 +24,9 @@ using on_sent_multicast_received_cbk_t = std::function<void(const byte_t*, lengt
 class udp_server_endpoint_impl : public udp_server_endpoint_base_impl, public multicast_endpoint {
 
 public:
+    using endpoint::send;
+    using endpoint::send_to;
+
     udp_server_endpoint_impl() = delete;
     udp_server_endpoint_impl(const udp_server_endpoint_impl&) = delete;
     udp_server_endpoint_impl(udp_server_endpoint_impl&&) = delete;
@@ -40,7 +43,7 @@ public:
     void restart(bool _force) override;
     void receive() override;
 
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) override;
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) override;
     bool send_queued(const target_data_iterator_type _it) override;
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,

@@ -14,6 +14,9 @@ namespace vsomeip_v3 {
 
 class virtual_server_endpoint_impl : public endpoint, public std::enable_shared_from_this<virtual_server_endpoint_impl> {
 public:
+    using endpoint::send;
+    using endpoint::send_to;
+
     virtual_server_endpoint_impl(const std::string& _address, uint16_t _port, bool _reliable, boost::asio::io_context& _io);
 
     virtual ~virtual_server_endpoint_impl();
@@ -27,8 +30,8 @@ public:
     void set_established(bool _established);
     void set_connected(bool _connected);
 
-    bool send(const byte_t* _data, uint32_t _size);
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
+    bool send(const send_buffer_sequence_ptr_t& _sequence) override;
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     void receive();
 
