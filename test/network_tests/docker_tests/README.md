@@ -11,4 +11,6 @@ the two-node topology + multicast.
 ```
 
 E2E suites stage `libvsomeip3-e2e.so.3` so routing can dlopen the stock
-plugin (no `VSOMEIP_E2E_PROTECTION_MODULE` override needed).
+plugin (no `VSOMEIP_E2E_PROTECTION_MODULE` override needed). Apps under
+test send hole-free payloads; see
+[`documentation/e2e-scatter-gather-send.md`](../../../documentation/e2e-scatter-gather-send.md).
