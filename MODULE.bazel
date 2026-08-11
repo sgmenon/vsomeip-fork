@@ -5,7 +5,7 @@
 
 module(
     name = "vsomeip",
-    version = "3.6.1.sgm.1",
+    version = "3.6.1.sgm.2",
     compatibility_level = 1,
 )
 
