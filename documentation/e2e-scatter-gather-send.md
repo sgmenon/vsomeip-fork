@@ -35,17 +35,17 @@ reassemble to contiguous memory; `check()` and strip stay on that path.
 
 ## 2. What changed
 
-| Layer | Before | After |
-|---|---|---|
-| App payload | Often pre-sized with E2E holes | Hole-free user data |
-| E2E plugin | In-place `protect(e2e_buffer&)` | Public `protect_parts` → `protect_result` |
-| Routing send | Protect, maybe flatten, `send(byte*, size)` | Compose `send_buffer_sequence`, always `send(sequence)` |
-| Endpoint queue / train | One contiguous `message_buffer_ptr_t` | Owning `send_buffer_sequence` |
-| TCP / UDP sockets | Single `const_buffer` | `vector<const_buffer>` (`buffers()`) |
+| Layer                  | Before                                      | After                                                   |
+| ---------------------- | ------------------------------------------- | ------------------------------------------------------- |
+| App payload            | Often pre-sized with E2E holes              | Hole-free user data                                     |
+| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect_parts` → `protect_result`               |
+| Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `send_buffer_sequence`, always `send(sequence)` |
+| Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `send_buffer_sequence`                           |
+| TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                    |
 
 JSON E2E configuration is unchanged. Profiles, offsets, and
-`e2e_enabled` keep working the same way — only the *application payload
-contract* changed.
+`e2e_enabled` keep working the same way — only the _application payload
+contract_ changed.
 
 ## 3. Application contract (migration)
 
@@ -54,7 +54,7 @@ application data only. The stack inserts the E2E header (and updates the
 SOME/IP length field) before the frame hits the wire.
 
 **Breaking for old hole-prealloc apps:** if your app still pads the
-payload with room for the E2E header, the plugin will add *another*
+payload with room for the E2E header, the plugin will add _another_
 header on top. The CRC will look fine to someone who enjoys chaos; the
 peer will not.
 
@@ -167,6 +167,6 @@ builds `//test/network_tests/docker_tests:e2e_pkgs` once (per-suite
 
 See also [`test/network_tests/docker_tests/README.md`](../test/network_tests/docker_tests/README.md).
 
-## 9. Follow-ups 
+## 9. Follow-ups
 
 Optional follow-ups: train-batching stress without E2E, SecOC plugins on the same contract, TP without `flatten()`.

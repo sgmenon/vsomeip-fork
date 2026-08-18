@@ -136,7 +136,6 @@ void fake_tcp_socket_handle::disconnect(std::optional<boost::system::error_code>
     }
     boost::asio::post(io_, [ec = *_ec, handler = std::move(receptor_->handler_)] { handler(ec, 0); });
     receptor_ = std::nullopt;
-    return;
 }
 void fake_tcp_socket_handle::delay_processing(bool _delay) {
     auto const lock = std::scoped_lock(mtx_);

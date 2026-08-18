@@ -10,8 +10,8 @@
 #include "attribute_recorder.hpp"
 #include "command_message.hpp"
 #include <boost/asio.hpp>
-#include <optional>
 #include <memory>
+#include <optional>
 
 namespace vsomeip_v3::testing {
 

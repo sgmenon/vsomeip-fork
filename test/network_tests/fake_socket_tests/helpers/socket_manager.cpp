@@ -296,47 +296,49 @@ void socket_manager::connect(boost::asio::ip::tcp::endpoint const& _ep, fake_tcp
                                               std::string const& _to_name, std::optional<boost::system::error_code> _to_error,
                                               socket_role _side_to_disconnect) {
     auto connection = get_connection(_from_name, _to_name);
-    auto weak_from = connection.first;
-    auto weak_to = connection.second;
+    auto from = connection.first.lock();
+    auto to = connection.second.lock();
 
-    auto disconnect_from = [&]() -> bool {
-        bool result = true;
-        if (auto from = weak_from.lock(); from) {
-            from->disconnect(_from_error);
-        } else if (_from_error) {
-            LOCAL_LOG << "The error code: \"" << _from_error->message() << "\" could not be injected into \"" << _from_name << "\"";
-            // if the error could not be injected -> error
-            result = false;
+    if (!from && !to) {
+        auto const cn = connection_name(_from_name, _to_name);
+        auto const lock = std::scoped_lock(mtx_);
+        if (app_names_to_connection.find(cn) == app_names_to_connection.end()) {
+            if (_from_error || _to_error) {
+                LOCAL_LOG << "no connection " << cn << " to inject into";
+                return false;
+            }
+            return true;
         }
-        return result;
-    };
-    auto disconnect_to = [&]() -> bool {
-        bool result = true;
-        if (auto to = weak_to.lock(); to) {
-            to->disconnect(_to_error);
-        } else if (_to_error) {
-            LOCAL_LOG << "The error code: \"" << _to_error->message() << "\" could not be injected into \"" << _to_name << "\"";
-            result = false;
-        }
-        return result;
-    };
+    }
 
-    bool result = true;
+    auto inject = [&](std::shared_ptr<fake_tcp_socket_handle> const& _socket, std::optional<boost::system::error_code> const& _error,
+                      std::string const& _name) {
+        if (_socket) {
+            _socket->disconnect(_error);
+            return;
+        }
+        if (_error) {
+            // Already closed: receive handler was invoked by shutdown/inner_close.
+            LOCAL_LOG << "The error code: \"" << _error->message() << "\" not injected into \"" << _name
+                      << "\"; socket already gone (handler already ran)";
+        }
+    };
 
     switch (_side_to_disconnect) {
     case socket_role::receiver:
-        result = disconnect_to();
+        inject(to, _to_error, _to_name);
         break;
     case socket_role::sender:
-        result = disconnect_from();
+        inject(from, _from_error, _from_name);
         break;
     case socket_role::unspecified:
     default:
-        result = disconnect_from() && disconnect_to();
+        inject(from, _from_error, _from_name);
+        inject(to, _to_error, _to_name);
         break;
     }
 
-    return result;
+    return true;
 }
 
 [[nodiscard]] bool socket_manager::await_assignment(std::string const& _app, std::chrono::milliseconds _timeout) {
