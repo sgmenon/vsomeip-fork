@@ -24,7 +24,7 @@ public:
 
     /**
      * Non-owning view of the app payload within a contiguous protected area
-     * (E2E header / fields stripped). Returns false if the buffer is too short
+     * (E2E header and footer stripped). Returns false if the buffer is too short
      * for this profile layout.
      */
     virtual bool get_unprotected_payload(buffer_view _protected_area, span<const uint8_t>& _out) const {

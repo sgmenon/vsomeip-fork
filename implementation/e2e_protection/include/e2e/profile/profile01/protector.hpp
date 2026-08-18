@@ -24,8 +24,6 @@ public:
     protect_result protect_parts(buffer_view _app_payload, instance_t _instance) override final;
 
 private:
-    void protect(e2e_buffer& _buffer, instance_t _instance);
-
     void write_counter(e2e_buffer& _buffer);
 
     void write_data_id(e2e_buffer& _buffer);

@@ -1,0 +1,13 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+cc_test(
+    name = "e2e_tests",
+    srcs = glob(["*.cpp"]),
+    deps = [
+        "//:vsomeip-e2e",
+        "//test/unit_tests:test_main",
+        "@googletest//:gtest",
+    ],
+)

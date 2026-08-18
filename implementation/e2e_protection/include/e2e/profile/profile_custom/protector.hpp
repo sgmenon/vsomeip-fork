@@ -23,10 +23,6 @@ public:
     protect_result protect_parts(buffer_view _app_payload, instance_t _instance) override final;
 
 private:
-    void protect(e2e_buffer& _buffer, instance_t _instance);
-    void write_crc(e2e_buffer& _buffer, uint32_t _computed_crc);
-
-private:
     profile_config config_;
     std::mutex protect_mutex_;
 };

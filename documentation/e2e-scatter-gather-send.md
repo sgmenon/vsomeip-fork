@@ -98,12 +98,13 @@ protect_result protect_parts(buffer_view app_payload, instance_t instance);
 ```
 
 [`protect_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
-is either:
+is always scatter:
 
-- **scatter:** optional `leading_gap` + `e2e_header` + `app_payload`
-  (common `offset_ == 0` case: header then payload), or
-- **`contiguous`:** one owned buffer for awkward layouts (Profile 01 bit
-  packing, non-zero offsets that do not map cleanly to a prefix).
+- **`e2e_header`** — optional E2E prefix (offset padding belongs here)
+- **`app_payload`** — hole-free user data. For some profiles (like AUTOSAR Profile 1)
+  that can put in CRCs in the middle of app data, use this field as a contiguous block.
+- **`e2e_footer`** — optional trailer (MAC / CRC after payload). Stock
+  AUTOSAR profiles leave this empty; plugins such as SecOC use it.
 
 Private per-profile `protect(e2e_buffer&)` helpers may still exist as
 implementation details. They are not part of the public plugin API.
@@ -126,14 +127,14 @@ wrapper for SD hosts and similar callers.
 ```
 App (hole-free payload)
   → serialize SOME/IP
-  → protect_parts (plugin owns E2E header)
+  → protect_parts (plugin owns E2E header / footer)
   → send_buffer_sequence
   → train.append_sequence (batch without concat)
   → async_write / async_send (buffers())
 ```
 
-On receive: contiguous buffer → `check()` → strip E2E framing → deliver
-hole-free payload to the application.
+On receive: contiguous buffer → `check()` → strip E2E header **and footer**
+→ deliver hole-free payload to the application.
 
 ## 7. Compatibility notes
 
@@ -150,6 +151,7 @@ hole-free payload to the application.
 
 ```bash
 # Unit / in-process
+bazel test //test/unit_tests/e2e_tests:e2e_tests
 bazel test //test/unit_tests/endpoint_tests:endpoint_tests
 bazel test //test/network_tests/fake_socket_tests:fake_socket_tests
 

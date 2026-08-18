@@ -19,8 +19,9 @@ namespace profile_interface {
 class protector : public profile_interface {
 public:
     /**
-     * Protect hole-free app payload. Returns E2E header (+ optional contiguous
-     * fallback) without requiring the caller to pre-allocate in-band holes.
+     * Protect hole-free app payload. Returns scatter pieces
+     * (e2e_header / app_payload / e2e_footer) without requiring the caller to
+     * pre-allocate in-band holes.
      */
     virtual protect_result protect_parts(buffer_view _app_payload, instance_t _instance) = 0;
 };

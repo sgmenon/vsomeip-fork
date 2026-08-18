@@ -52,6 +52,8 @@ private:
     std::map<e2exf::data_identifier_t, std::size_t> custom_bases_;
     // Byte offset of app payload within the protected area (after E2E header/fields).
     std::map<e2exf::data_identifier_t, std::size_t> custom_payload_starts_;
+    // Trailing E2E footer bytes to exclude from the app payload view.
+    std::map<e2exf::data_identifier_t, std::size_t> custom_payload_footers_;
 
     template<typename config_t>
     config_t make_e2e_profile_config(const std::shared_ptr<cfg::e2e>& config);
@@ -66,6 +68,11 @@ private:
     static std::size_t payload_start(const profile_custom::profile_config& _config) {
         return static_cast<std::size_t>(_config.crc_offset_) + 4U;
     }
+    static std::size_t payload_footer(const profile01::profile_config&) { return 0; }
+    static std::size_t payload_footer(const profile04::profile_config&) { return 0; }
+    static std::size_t payload_footer(const profile05::profile_config&) { return 0; }
+    static std::size_t payload_footer(const profile07::profile_config&) { return 0; }
+    static std::size_t payload_footer(const profile_custom::profile_config&) { return 0; }
 
     template<typename config_t, typename checker_t, typename protector_t>
     void process_e2e_profile(std::shared_ptr<cfg::e2e> config) {
@@ -84,6 +91,7 @@ private:
 
         custom_bases_[data_identifier] = profile_config.base_;
         custom_payload_starts_[data_identifier] = payload_start(profile_config);
+        custom_payload_footers_[data_identifier] = payload_footer(profile_config);
     }
 };
 
