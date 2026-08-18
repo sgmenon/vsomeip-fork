@@ -25,13 +25,8 @@ public:
     protect_result protect_parts(buffer_view _app_payload, instance_t _instance) override final;
 
 private:
-    void protect(e2e_buffer& _buffer, instance_t _instance);
-    bool verify_inputs(e2e_buffer& _buffer);
     uint32_t get_counter(instance_t _instance) const;
     void increment_counter(instance_t _instance);
-
-    void write_32(e2e_buffer& _buffer, uint32_t _data, size_t _index);
-    void write_64(e2e_buffer& _buffer, uint64_t _data, size_t _index);
 
 private:
     profile_config config_;

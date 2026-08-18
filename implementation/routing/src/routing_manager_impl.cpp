@@ -110,13 +110,9 @@ send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<
         }
     };
 
-    if (its_parts.contiguous) {
-        append_e2e_buf(its_parts.contiguous);
-    } else {
-        append_e2e_buf(its_parts.leading_gap);
-        append_e2e_buf(its_parts.e2e_header);
-        append_e2e_buf(its_parts.app_payload);
-    }
+    append_e2e_buf(its_parts.e2e_header);
+    append_e2e_buf(its_parts.app_payload);
+    append_e2e_buf(its_parts.e2e_footer);
 
     return its_sequence;
 }

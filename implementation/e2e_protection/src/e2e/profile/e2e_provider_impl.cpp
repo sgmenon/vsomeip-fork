@@ -135,11 +135,14 @@ bool e2e_provider_impl::get_unprotected_payload(e2exf::data_identifier_t id, buf
     }
 
     const std::size_t its_start = found->second;
-    if (_protected_area.data_length() < its_start) {
+    std::size_t its_footer = 0;
+    if (const auto found_footer = custom_payload_footers_.find(id); found_footer != custom_payload_footers_.end()) {
+        its_footer = found_footer->second;
+    }
+    if (_protected_area.data_length() < its_start + its_footer) {
         return false;
     }
-
-    _out = span<const uint8_t>(_protected_area.begin() + its_start, _protected_area.data_length() - its_start);
+    _out = span<const uint8_t>(_protected_area.begin() + its_start, _protected_area.data_length() - its_start - its_footer);
     return true;
 }
 

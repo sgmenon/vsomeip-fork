@@ -14,30 +14,25 @@
 namespace vsomeip_v3 {
 namespace e2e {
 
-// Result of scatter-oriented protect: either one contiguous protected
-// buffer, or header (+ optional leading gap) separate from app payload.
+// Scatter pieces for the protected area (after SOME/IP base). Any piece may be
+// empty. Offset padding belongs at the front of e2e_header. Trailers (CRC/MAC)
+// belong in e2e_footer.
 struct protect_result {
     bool valid{false};
-    // If contiguous is set, it alone is the full protected area (after SOME/IP base).
-    std::shared_ptr<e2e_buffer> contiguous;
-    // Otherwise scatter: optional leading_gap (for offset>0), then e2e_header, then app_payload.
-    std::shared_ptr<e2e_buffer> leading_gap;
     std::shared_ptr<e2e_buffer> e2e_header;
     std::shared_ptr<e2e_buffer> app_payload;
+    std::shared_ptr<e2e_buffer> e2e_footer;
 
     std::size_t size() const {
-        if (contiguous) {
-            return contiguous->size();
-        }
         std::size_t total = 0;
-        if (leading_gap) {
-            total += leading_gap->size();
-        }
         if (e2e_header) {
             total += e2e_header->size();
         }
         if (app_payload) {
             total += app_payload->size();
+        }
+        if (e2e_footer) {
+            total += e2e_footer->size();
         }
         return total;
     }

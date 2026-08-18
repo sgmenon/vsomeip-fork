@@ -35,17 +35,17 @@ reassemble to contiguous memory; `check()` and strip stay on that path.
 
 ## 2. What changed
 
-| Layer | Before | After |
-|---|---|---|
-| App payload | Often pre-sized with E2E holes | Hole-free user data |
-| E2E plugin | In-place `protect(e2e_buffer&)` | Public `protect_parts` → `protect_result` |
-| Routing send | Protect, maybe flatten, `send(byte*, size)` | Compose `send_buffer_sequence`, always `send(sequence)` |
-| Endpoint queue / train | One contiguous `message_buffer_ptr_t` | Owning `send_buffer_sequence` |
-| TCP / UDP sockets | Single `const_buffer` | `vector<const_buffer>` (`buffers()`) |
+| Layer                  | Before                                      | After                                                   |
+| ---------------------- | ------------------------------------------- | ------------------------------------------------------- |
+| App payload            | Often pre-sized with E2E holes              | Hole-free user data                                     |
+| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect_parts` → `protect_result`               |
+| Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `send_buffer_sequence`, always `send(sequence)` |
+| Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `send_buffer_sequence`                           |
+| TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                    |
 
 JSON E2E configuration is unchanged. Profiles, offsets, and
-`e2e_enabled` keep working the same way — only the *application payload
-contract* changed.
+`e2e_enabled` keep working the same way — only the _application payload
+contract_ changed.
 
 ## 3. Application contract (migration)
 
@@ -54,7 +54,7 @@ application data only. The stack inserts the E2E header (and updates the
 SOME/IP length field) before the frame hits the wire.
 
 **Breaking for old hole-prealloc apps:** if your app still pads the
-payload with room for the E2E header, the plugin will add *another*
+payload with room for the E2E header, the plugin will add _another_
 header on top. The CRC will look fine to someone who enjoys chaos; the
 peer will not.
 
@@ -98,12 +98,13 @@ protect_result protect_parts(buffer_view app_payload, instance_t instance);
 ```
 
 [`protect_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
-is either:
+is always scatter:
 
-- **scatter:** optional `leading_gap` + `e2e_header` + `app_payload`
-  (common `offset_ == 0` case: header then payload), or
-- **`contiguous`:** one owned buffer for awkward layouts (Profile 01 bit
-  packing, non-zero offsets that do not map cleanly to a prefix).
+- **`e2e_header`** — optional E2E prefix (offset padding belongs here)
+- **`app_payload`** — hole-free user data. For some profiles (like AUTOSAR Profile 1)
+  that can put in CRCs in the middle of app data, use this field as a contiguous block.
+- **`e2e_footer`** — optional trailer (MAC / CRC after payload). Stock
+  AUTOSAR profiles leave this empty; plugins such as SecOC use it.
 
 Private per-profile `protect(e2e_buffer&)` helpers may still exist as
 implementation details. They are not part of the public plugin API.
@@ -126,14 +127,14 @@ wrapper for SD hosts and similar callers.
 ```
 App (hole-free payload)
   → serialize SOME/IP
-  → protect_parts (plugin owns E2E header)
+  → protect_parts (plugin owns E2E header / footer)
   → send_buffer_sequence
   → train.append_sequence (batch without concat)
   → async_write / async_send (buffers())
 ```
 
-On receive: contiguous buffer → `check()` → strip E2E framing → deliver
-hole-free payload to the application.
+On receive: contiguous buffer → `check()` → strip E2E header **and footer**
+→ deliver hole-free payload to the application.
 
 ## 7. Compatibility notes
 
@@ -150,6 +151,7 @@ hole-free payload to the application.
 
 ```bash
 # Unit / in-process
+bazel test //test/unit_tests/e2e_tests:e2e_tests
 bazel test //test/unit_tests/endpoint_tests:endpoint_tests
 bazel test //test/network_tests/fake_socket_tests:fake_socket_tests
 
@@ -165,6 +167,6 @@ builds `//test/network_tests/docker_tests:e2e_pkgs` once (per-suite
 
 See also [`test/network_tests/docker_tests/README.md`](../test/network_tests/docker_tests/README.md).
 
-## 9. Follow-ups 
+## 9. Follow-ups
 
 Optional follow-ups: train-batching stress without E2E, SecOC plugins on the same contract, TP without `flatten()`.

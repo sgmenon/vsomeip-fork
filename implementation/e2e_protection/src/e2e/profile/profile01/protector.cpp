@@ -3,58 +3,37 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-#include <iomanip>
 #include <algorithm>
 #include <memory>
 #include <mutex>
 
-#include <vsomeip/internal/logger.hpp>
 #include "../../../../include/e2e/profile/profile01/protector.hpp"
 
 namespace vsomeip_v3 {
 namespace e2e {
 namespace profile01 {
 
-/** @req [SWS_E2E_00195] */
-void protector::protect(e2e_buffer& _buffer, instance_t _instance) {
-
-    (void)_instance;
-
-    std::lock_guard<std::mutex> lock(protect_mutex_);
-
-    if (profile_01::is_buffer_length_valid(config_, _buffer)) {
-        // write the current Counter value in Data
-        write_counter(_buffer);
-
-        // write DataID nibble in Data (E2E_P01_DATAID_NIBBLE) in Data
-        write_data_id(_buffer);
-
-        // compute the CRC over DataID and Data
-        uint8_t computed_crc = profile_01::compute_crc(config_, _buffer);
-        // write CRC in Data
-        write_crc(_buffer, computed_crc);
-
-        // increment the Counter (new value will be used in the next invocation of
-        // E2E_P01Protect()),
-        increment_counter();
-    }
-}
-
 protect_result protector::protect_parts(buffer_view _app_payload, instance_t _instance) {
     (void)_instance;
+    std::lock_guard<std::mutex> lock(protect_mutex_);
 
-    // AUTOSAR data_length is in bits; is_buffer_length_valid requires (data_length/8)+1 bytes.
     const std::size_t total = static_cast<std::size_t>(config_.data_length_ / 8) + 1U;
     if (_app_payload.data_length() > total) {
         return protect_result{};
     }
 
-    e2e_buffer its_buffer(total, 0);
-    std::copy(_app_payload.begin(), _app_payload.end(), its_buffer.begin() + (total - _app_payload.data_length()));
-    protect(its_buffer, _instance);
+    e2e_buffer packed(total, 0);
+    if (!profile_01::is_buffer_length_valid(config_, packed)) {
+        return protect_result{};
+    }
+    std::copy(_app_payload.begin(), _app_payload.end(), packed.begin() + (total - _app_payload.data_length()));
+    write_counter(packed);
+    write_data_id(packed);
+    write_crc(packed, profile_01::compute_crc(config_, packed));
+    increment_counter();
 
     protect_result its_result;
-    its_result.contiguous = std::make_shared<e2e_buffer>(std::move(its_buffer));
+    its_result.app_payload = std::make_shared<e2e_buffer>(std::move(packed));
     its_result.valid = true;
     return its_result;
 }

@@ -80,6 +80,9 @@ public:
     /**
      * Searches for a directed connection _from_name to _to_name and calls
      * fake_tcp_socket_handle::disconnect and accumulates the result.
+     *
+     * If a requested end is already gone, that is still success: vsomeip
+     * already invoked its receive handler via shutdown/inner_close.
      */
     [[nodiscard]] bool disconnect(std::string const& _from_name, std::optional<boost::system::error_code> _from_error,
                                   std::string const& _to_name, std::optional<boost::system::error_code> _to_error,

@@ -36,7 +36,7 @@ public:
 
     /**
      * View into app payload within a contiguous protected area (after get_protection_base),
-     * with E2E header/fields excluded. Does not allocate; lifetime tied to _protected_area.
+     * with E2E header and footer excluded. Does not allocate; lifetime tied to _protected_area.
      */
     virtual bool get_unprotected_payload(e2exf::data_identifier_t id, buffer_view _protected_area,
                                          span<const uint8_t>& _out) const = 0;
