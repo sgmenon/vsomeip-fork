@@ -77,5 +77,6 @@ gcc_toolchain_extension = use_extension("@bazel-toolchains//gcc_toolchain:toolch
     ]
     for gcc_version in [
         "gcc11",
+        "gcc13",
     ]
 ]

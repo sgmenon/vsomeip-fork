@@ -23,7 +23,7 @@ public:
      * (e2e_header / app_payload / e2e_footer) without requiring the caller to
      * pre-allocate in-band holes.
      */
-    virtual protect_result protect_parts(buffer_view _app_payload, instance_t _instance) = 0;
+    virtual protect_result protect(buffer_view _app_payload, instance_t _instance) = 0;
 };
 
 } // namespace profile_interface

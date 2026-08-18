@@ -10,7 +10,7 @@ namespace vsomeip_v3 {
 namespace e2e {
 namespace profile01 {
 
-uint8_t profile_01::compute_crc(const profile_config& _config, const e2e_buffer& _buffer) {
+uint8_t profile_01::compute_crc(const profile_config& _config, const buffer_view& _buffer) {
     uint8_t computed_crc = 0xFF;
     e2e_buffer data_id_buffer; //(_data, _data+_size);
     data_id_buffer.push_back((uint8_t)(_config.data_id_ >> 8)); // insert MSB
@@ -105,7 +105,7 @@ uint8_t profile_01::compute_crc(const profile_config& _config, const e2e_buffer&
 }
 
 /** @req [SWS_E2E_00356] */
-bool profile_01::is_buffer_length_valid(const profile_config& _config, const e2e_buffer& _buffer) {
+bool profile_01::is_buffer_length_valid(const profile_config& _config, const buffer_view& _buffer) {
     return (((_config.data_length_ / 8) + 1U <= _buffer.size()) && _config.crc_offset_ <= _buffer.size()
             && _config.counter_offset_ / 8 <= _buffer.size() && _config.data_id_nibble_offset_ / 8 <= _buffer.size());
 }

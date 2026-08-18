@@ -9,12 +9,9 @@
 #include <string>
 #include <memory>
 
-#include <vsomeip/span.hpp>
-
 #include "../../buffer/buffer.hpp"
 #include "../../e2exf/config.hpp"
 #include "../../../../configuration/include/e2e.hpp"
-#include "profile_interface/profile_interface.hpp"
 #include "protect_result.hpp"
 
 namespace vsomeip_v3 {
@@ -28,18 +25,10 @@ public:
     virtual bool is_protected(e2exf::data_identifier_t id) const = 0;
     virtual bool is_checked(e2exf::data_identifier_t id) const = 0;
 
-    virtual std::size_t get_protection_base(e2exf::data_identifier_t _id) const = 0;
+    virtual protect_result protect(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) = 0;
 
-    virtual protect_result protect_parts(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) = 0;
-    virtual void check(e2exf::data_identifier_t id, const e2e_buffer& _buffer, instance_t _instance,
-                       e2e::profile_interface::check_status_t& _generic_check_status) = 0;
-
-    /**
-     * View into app payload within a contiguous protected area (after get_protection_base),
-     * with E2E header and footer excluded. Does not allocate; lifetime tied to _protected_area.
-     */
-    virtual bool get_unprotected_payload(e2exf::data_identifier_t id, buffer_view _protected_area,
-                                         span<const uint8_t>& _out) const = 0;
+    // Full SOME/IP message. Returned spans point into `_message`.
+    virtual check_result check(e2exf::data_identifier_t id, buffer_view _message, instance_t _instance) = 0;
 };
 
 } // namespace e2e

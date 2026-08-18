@@ -11,6 +11,15 @@ set(configuration_files
 )
 configure_files("${configuration_files}")
 
+# Protocol command types live in libvsomeip3 but are not exported,
+# Compile the .cpp files into this test
+set(VSIP_PROTOCOL_SRCS
+    ../../../implementation/protocol/src/command.cpp
+    ../../../implementation/protocol/src/config_command.cpp
+    ../../../implementation/protocol/src/routing_info_command.cpp
+    ../../../implementation/protocol/src/routing_info_entry.cpp
+)
+
 # Add test executable.
 add_executable(${PROJECT_NAME}
     helpers/app.cpp
@@ -23,6 +32,7 @@ add_executable(${PROJECT_NAME}
     main.cpp
     test_connection_restoration.cpp
     test_write_buffer_count.cpp
+    ${VSIP_PROTOCOL_SRCS}
 )
 
 targets_link_default_libraries("${PROJECT_NAME}")

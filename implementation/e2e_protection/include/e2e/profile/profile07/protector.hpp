@@ -22,7 +22,7 @@ public:
 
     explicit protector(const profile_config& _config) : config_(_config) { }
 
-    protect_result protect_parts(buffer_view _app_payload, instance_t _instance) override final;
+    protect_result protect(buffer_view _app_payload, instance_t _instance) override final;
 
 private:
     uint32_t get_counter(instance_t _instance) const;

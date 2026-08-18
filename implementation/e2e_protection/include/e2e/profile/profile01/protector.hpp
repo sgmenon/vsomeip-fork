@@ -21,7 +21,7 @@ public:
 
     explicit protector(const profile_config& _config) : config_(_config), counter_(0) {};
 
-    protect_result protect_parts(buffer_view _app_payload, instance_t _instance) override final;
+    protect_result protect(buffer_view _app_payload, instance_t _instance) override final;
 
 private:
     void write_counter(e2e_buffer& _buffer);

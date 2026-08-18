@@ -3,91 +3,90 @@
 The network-tests can be run on your laptop using the Docker Compose setup designed for Zuul.
 This page will guide you to accomplish that goal.
 
-* [Prerequisites](#prerequisites)
-* [Main steps](#main-steps)
-* [FAQ](#faq)
+- [Prerequisites](#prerequisites)
+- [Main steps](#main-steps)
+- [FAQ](#faq)
 
 ## Prerequisites
 
 1. Up-to-date clone of vsomeip, checked out on master or on a branch recently created from it.
 2. Recent Docker version with Compose plugin installed
 
-    Check Docker version with docker info, must be at least 23.x.y or 24.x.y, otherwise follow the official instructions to install a newer version: <https://docs.docker.com/engine/install/ubuntu/>
+   Check Docker version with docker info, must be at least 23.x.y or 24.x.y, otherwise follow the official instructions to install a newer version: <https://docs.docker.com/engine/install/ubuntu/>
 
-    ```bash
-    $ docker info
-    Client: Docker Engine - Community
-    Version:    24.0.2
-    (...)
-    ```
+   ```bash
+   $ docker info
+   Client: Docker Engine - Community
+   Version:    24.0.2
+   (...)
+   ```
 
-    Check if the Docker Compose plugin is installed with docker compose version. If the command fails, follow the official instructions to rectify your Docker installation: <https://docs.docker.com/engine/install/ubuntu/>
+   Check if the Docker Compose plugin is installed with docker compose version. If the command fails, follow the official instructions to rectify your Docker installation: <https://docs.docker.com/engine/install/ubuntu/>
 
-    ```bash
-    $ docker compose version
-    Docker Compose version v2.18.1
-    ```
+   ```bash
+   $ docker compose version
+   Docker Compose version v2.18.1
+   ```
 
 ## Main steps
 
 1. Set the sanitizer or valgrind type you'd like to use (use sanitizer LEAK if you don't know or care which one gets used)
 
-    **Syntax sanitizers**
+   **Syntax sanitizers**
 
-    ```bash
-    export SANITIZER_TYPE=<ADDRESS | LEAK | THREAD | UNDEFINED>
-    ```
+   ```bash
+   export SANITIZER_TYPE=<ADDRESS | LEAK | THREAD | UNDEFINED>
+   ```
 
-    **Example**
+   **Example**
 
-    ```bash
-    export SANITIZER_TYPE=LEAK
-    ```
+   ```bash
+   export SANITIZER_TYPE=LEAK
+   ```
 
-    **Syntax valgrinds**
+   **Syntax valgrinds**
 
-    ```bash
-    export VALGRIND_TYPE=<massif | memcheck>
-    ```
+   ```bash
+   export VALGRIND_TYPE=<massif | memcheck>
+   ```
 
-    **Example**
+   **Example**
 
-    ```bash
-    export VALGRIND_TYPE=memcheck
-    ```
+   ```bash
+   export VALGRIND_TYPE=memcheck
+   ```
 
-    **NOTES**
+   **NOTES**
 
-    **Sanitizers** and **Valgrinds** are not compatible with each other, so it's not possible to use them simultaneously.
-    To avoid running the tests with both tools set one of them as empty. When using valgrind, make sure the type is specified in lowercase as shown in the examples.
+   **Sanitizers** and **Valgrinds** are not compatible with each other, so it's not possible to use them simultaneously.
+   To avoid running the tests with both tools set one of them as empty. When using valgrind, make sure the type is specified in lowercase as shown in the examples.
 
-    **Example**
+   **Example**
 
-    ```bash
-    export SANITIZER_TYPE=''
-    export VALGRIND_TYPE=memcheck
-    ```
+   ```bash
+   export SANITIZER_TYPE=''
+   export VALGRIND_TYPE=memcheck
+   ```
 
 2. Create the containers (you must be inside the vsomeip repo to run this step). This will first build the Docker image used by both that contains everything needed to build and run the network-tests (CMake, GCC, Boost, etc.)
 
-    ```bash
-    docker compose --project-directory zuul/network-tests build
-    ```
+   ```bash
+   docker compose --project-directory zuul/network-tests build
+   ```
 
 3. Start the containers (same as above, you must be inside the repo directory). This will build vsomeip-lib and then run the network-tests
 
-    ```bash
-    docker compose --project-directory zuul/network-tests up
-    ```
+   ```bash
+   docker compose --project-directory zuul/network-tests up
+   ```
 
 ## FAQ
 
 **Question**: I get a strange CMake error when I start the containers
 
-This occurs if you have recently rebuilt vsomeip-lib outside the Docker Compose setup.
-It can also occur when rebuilding vsomeip-lib after pulling new changes from upstream.
+Compose mounts a dedicated `build-network-tests/` directory (override with `BUILD_DIR`). Do not reuse a host-side `./build`: CMakeCache records absolute paths, and `/home/build` inside the container is not the same as `/home/.../vsomeip-debug/build` on the host.
 
-You can fix it by removing the build directory located inside the repo directory.
+If you still point `BUILD_DIR` at an existing cache, delete that directory and run `up` again.
 
 **Question**: I'd like to run only a subset of the network-tests
 

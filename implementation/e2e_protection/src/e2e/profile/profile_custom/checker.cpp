@@ -13,31 +13,28 @@ namespace vsomeip_v3 {
 namespace e2e {
 namespace profile_custom {
 
-void profile_custom_checker::check(const e2e_buffer& _buffer, instance_t _instance,
-                                   e2e::profile_interface::check_status_t& _generic_check_status) {
+check_result profile_custom_checker::check(buffer_view _buffer, instance_t _instance) {
 
     (void)_instance;
 
     std::lock_guard<std::mutex> lock(check_mutex_);
-    _generic_check_status = e2e::profile_interface::generic_check_status::E2E_ERROR;
+    auto status = e2e::profile_interface::generic_check_status::E2E_ERROR;
 
     if (profile_custom::is_buffer_length_valid(config_, _buffer)) {
-        uint32_t received_crc(0);
-        uint32_t calculated_crc(0);
-
-        received_crc = read_crc(_buffer);
-        calculated_crc = profile_custom::compute_crc(config_, _buffer);
+        uint32_t received_crc = read_crc(_buffer);
+        uint32_t calculated_crc = profile_custom::compute_crc(config_, _buffer);
         if (received_crc == calculated_crc) {
-            _generic_check_status = e2e::profile_interface::generic_check_status::E2E_OK;
+            status = e2e::profile_interface::generic_check_status::E2E_OK;
         } else {
-            _generic_check_status = e2e::profile_interface::generic_check_status::E2E_WRONG_CRC;
+            status = e2e::profile_interface::generic_check_status::E2E_WRONG_CRC;
             VSOMEIP_INFO << std::hex << "E2E protection: CRC32 does not match: calculated CRC: " << (uint32_t)calculated_crc
                          << " received CRC: " << (uint32_t)received_crc;
         }
     }
+    return make_check_result(status, _buffer, static_cast<std::size_t>(config_.crc_offset_) + 4U);
 }
 
-uint32_t profile_custom_checker::read_crc(const e2e_buffer& _buffer) const {
+uint32_t profile_custom_checker::read_crc(buffer_view _buffer) const {
     return (static_cast<uint32_t>(_buffer[config_.crc_offset_]) << 24U) | (static_cast<uint32_t>(_buffer[config_.crc_offset_ + 1U]) << 16U)
             | (static_cast<uint32_t>(_buffer[config_.crc_offset_ + 2U]) << 8U) | static_cast<uint32_t>(_buffer[config_.crc_offset_ + 3U]);
 }

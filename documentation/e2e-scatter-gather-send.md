@@ -18,7 +18,7 @@ The redesign has three goals that mainline benefits from equally:
 
 1. **Apps send user data only.** No pre-sized E2E holes. Profile/config
    changes stop leaking into every client and service sample.
-2. **The plugin owns the E2E header buffer.** `protect_parts` returns
+2. **The plugin owns the E2E header buffer.** `protect` returns
    owned pieces instead of mutating a caller buffer in place.
 3. **Send stays scatter-gather to the socket.** Routing and endpoints
    pass a multi-buffer sequence into Asio (`async_write` /
@@ -38,7 +38,8 @@ reassemble to contiguous memory; `check()` and strip stay on that path.
 | Layer                  | Before                                      | After                                                   |
 | ---------------------- | ------------------------------------------- | ------------------------------------------------------- |
 | App payload            | Often pre-sized with E2E holes              | Hole-free user data                                     |
-| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect_parts` → `protect_result`               |
+| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect` → `protect_result`                     |
+| E2E check / strip      | `check` + `get_unprotected_payload`         | `check` → `check_result` (spans into receive buffer)    |
 | Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `send_buffer_sequence`, always `send(sequence)` |
 | Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `send_buffer_sequence`                           |
 | TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                    |
@@ -62,7 +63,7 @@ Receive delivery to the application is hole-free again after a successful
 check + strip. Application handlers should not see the E2E header bytes.
 
 External E2E plugins (for example GM SecOC) should implement the same
-`protect_parts` contract when they move onto this path.
+`protect` / `check` contract when they move onto this path.
 
 ## 4. The type that carries it: `send_buffer_sequence`
 
@@ -87,54 +88,86 @@ The nPDU `train` now holds a `send_buffer_sequence_ptr_t` and appends
 passenger messages with `append_sequence` instead of copying bytes into
 one blob.
 
-## 5. Protect API
+## 5. Protect and check APIs
 
 Public surface
 ([`e2e_provider.hpp`](../implementation/e2e_protection/include/e2e/profile/e2e_provider.hpp),
-[`protector.hpp`](../implementation/e2e_protection/include/e2e/profile/profile_interface/protector.hpp)):
+[`protector.hpp`](../implementation/e2e_protection/include/e2e/profile/profile_interface/protector.hpp),
+[`checker.hpp`](../implementation/e2e_protection/include/e2e/profile/profile_interface/checker.hpp)):
 
 ```cpp
-protect_result protect_parts(buffer_view app_payload, instance_t instance);
+protect_result protect(buffer_view app_payload, instance_t instance);
+check_result   check(buffer_view message, instance_t instance);
 ```
 
+Provider `check` takes the **full SOME/IP message**. Profile checkers see
+the protected area after the 16-byte SOME/IP header. Returned spans still
+point into the caller's receive buffer.
+
 [`protect_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
-is always scatter:
+is always scatter (owned buffers):
 
 - **`e2e_header`** — optional E2E prefix (offset padding belongs here)
 - **`app_payload`** — hole-free user data. For some profiles (like AUTOSAR Profile 1)
-  that can put in CRCs in the middle of app data, use this field as a contiguous block.
+  that can put CRCs in the middle of app data, use this field as a contiguous block.
 - **`e2e_footer`** — optional trailer (MAC / CRC after payload). Stock
   AUTOSAR profiles leave this empty; plugins such as SecOC use it.
 
-Private per-profile `protect(e2e_buffer&)` helpers may still exist as
-implementation details. They are not part of the public plugin API.
+[`check_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
+mirrors those three sections as **non-owning spans** plus `status`:
+
+- **`status`** — `E2E_OK` / `E2E_WRONG_CRC` / `E2E_ERROR`
+- **`e2e_header` / `app_payload` / `e2e_footer`** — views into the receive
+  buffer. Sections are filled even on CRC failure so strip can still run.
+
+Profile 1 is the one mismatch: `protect` packs CRC/counter/nibble into
+`app_payload` (empty header). `check` still reports those leading in-band
+fields as `e2e_header` so routing can drop them without a second lookup.
 
 Routing composes the on-wire sequence in
 `compose_e2e_protected_sequence` inside
-[`routing_manager_impl.cpp`](../implementation/routing/src/routing_manager_impl.cpp):
+[`routing_manager_impl.cpp`](../implementation/routing/src/routing_manager_impl.cpp)
+by **appending** pieces into one `send_buffer_sequence` — no concat:
 
 ```
-[SOME/IP header with fixed length] + [E2E pieces from protect_parts]
+[SOME/IP header with fixed length] [e2e_header] [app_payload] [e2e_footer]
 ```
 
-then calls `endpoint::send(sequence)`. Contiguous non-E2E sends wrap
-`byte*` into a one-buffer sequence. The preferred endpoint API is the
-sequence overload; `send(byte*, size)` remains a thin non-virtual
-wrapper for SD hosts and similar callers.
+Empty pieces are skipped. Each remaining vector stays in `storage_`;
+`buffers()` is the matching `vector<const_buffer>` (an Asio
+`ConstBufferSequence`). The endpoint queues that object (the nPDU train
+`append_sequence`s passengers the same way). On the wire the socket
+calls `async_write` / `async_send` with `sequence->buffers()`, which is
+`writev`: several iovec entries, one syscall, still one TCP segment /
+UDP datagram.
+
+A one-buffer sequence is the same path with iovec length 1. That is
+what non-E2E remote sends build at the call site, and what
+`send(byte*, size)` (non-virtual; SD-only host, `send_local`, routing
+stub) wraps into. Local TCP/UDS prepends/appends the `0x67…` framing
+tags as extra `const_buffer`s around the same sequence.
+
+`flatten()` is the escape hatch when pointer arithmetic still wants one
+blob (SOME/IP-TP split, tracing). It is not the send path.
 
 ## 6. Data path
 
 ```
 App (hole-free payload)
   → serialize SOME/IP
-  → protect_parts (plugin owns E2E header / footer)
+  → protect (plugin owns E2E header / footer)
   → send_buffer_sequence
   → train.append_sequence (batch without concat)
   → async_write / async_send (buffers())
 ```
 
-On receive: contiguous buffer → `check()` → strip E2E header **and footer**
-→ deliver hole-free payload to the application.
+On receive there is no scatter-gather. The datagram is already contiguous.
+`check()` verifies CRC/counter in place and returns spans for the three
+sections. `strip_e2e_protected_payload` rebuilds
+`[bytes before e2e_header] + app_payload` (footer is dropped) and rewrites
+the SOME/IP length. Stock AUTOSAR footers are empty. P01 protect packs
+CRC/counter/nibble into `app_payload`; check still exposes those leading
+fields as `e2e_header` so the same strip path works.
 
 ## 7. Compatibility notes
 

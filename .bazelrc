@@ -8,8 +8,14 @@ common --@spdlog//:header_only=false
 
 build:opt --compilation_mode=opt
 
-build:aarch64 --platforms=@bazel-toolchains//platforms:aarch64_linux_gcc11
-build:aarch64 --extra_toolchains=@gcc_toolchain_aarch64-gcc11//:cc_toolchain
+build:gcc13  --host_platform=@bazel-toolchains//platforms:x86_64_linux_gcc13
+build:gcc13 --platforms=@bazel-toolchains//platforms:x86_64_linux_gcc13
+build:gcc13 --extra_toolchains=@gcc_toolchain_x86_64-gcc13//:cc_toolchain
+build:gcc13 --platform_suffix=gcc13
+
+build:aarch64 --platforms=@bazel-toolchains//platforms:aarch64_linux_gcc13
+build:aarch64 --extra_toolchains=@gcc_toolchain_aarch64-gcc13//:cc_toolchain
+build:aarch64 --platform_suffix=aarch64
 
 # Debugging and sanitizer configurations
 build:debug --compilation_mode=dbg

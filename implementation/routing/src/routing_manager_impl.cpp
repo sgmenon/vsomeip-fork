@@ -83,13 +83,13 @@ send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<
         return nullptr;
     }
 
-    const size_t its_base = _provider->get_protection_base({its_service, its_method});
+    const size_t its_base = VSOMEIP_FULL_HEADER_SIZE;
     if (its_base > _size) {
         return nullptr;
     }
 
     const buffer_view its_app_payload(_data + its_base, _size - its_base);
-    e2e::protect_result its_parts = _provider->protect_parts({its_service, its_method}, its_app_payload, _instance);
+    e2e::protect_result its_parts = _provider->protect({its_service, its_method}, its_app_payload, _instance);
     if (!its_parts.valid) {
         return nullptr;
     }
@@ -120,34 +120,26 @@ send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<
 /**
  * After a successful (or attempted) check, rebuild the message with E2E framing
  * removed so the application sees a hole-free payload. Returns nullptr if the
- * message is not E2E-checked or stripping is not possible.
+ * check result has no usable sections.
  */
-message_buffer_ptr_t strip_e2e_protected_payload(const std::shared_ptr<e2e::e2e_provider>& _provider, const byte_t* _data, uint32_t _size) {
-    if (!_provider || !_data || _size < VSOMEIP_SOMEIP_HEADER_SIZE) {
+message_buffer_ptr_t strip_e2e_protected_payload(const byte_t* _data, uint32_t _size, const e2e::check_result& _checked) {
+    if (!_data || _size < VSOMEIP_SOMEIP_HEADER_SIZE) {
+        return nullptr;
+    }
+    if (_checked.e2e_header.empty() && _checked.app_payload.empty()) {
         return nullptr;
     }
 
-    const service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-    const method_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
-    if (!_provider->is_checked({its_service, its_method})) {
+    const uint8_t* e2e_begin = !_checked.e2e_header.empty() ? _checked.e2e_header.data() : _checked.app_payload.data();
+    if (e2e_begin < _data || e2e_begin > _data + _size) {
         return nullptr;
     }
-
-    const size_t its_base = _provider->get_protection_base({its_service, its_method});
-    if (its_base > _size) {
-        return nullptr;
-    }
-
-    const buffer_view its_protected(_data + its_base, _size - its_base);
-    span<const uint8_t> its_app;
-    if (!_provider->get_unprotected_payload({its_service, its_method}, its_protected, its_app)) {
-        return nullptr;
-    }
+    const size_t its_base = static_cast<size_t>(e2e_begin - _data);
 
     auto its_out = std::make_shared<message_buffer_t>();
-    its_out->reserve(its_base + its_app.size());
+    its_out->reserve(its_base + _checked.app_payload.size());
     its_out->insert(its_out->end(), _data, _data + its_base);
-    its_out->insert(its_out->end(), its_app.begin(), its_app.end());
+    its_out->insert(its_out->end(), _checked.app_payload.begin(), _checked.app_payload.end());
 
     const uint32_t its_new_total = static_cast<uint32_t>(its_out->size());
     if (its_out->size() >= VSOMEIP_LENGTH_POS_MAX + 1) {
@@ -1443,10 +1435,9 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
                         VSOMEIP_DEBUG << "routing_manager_impl::on_message() <<<< e2e_provider enabled, checking SD message ..";
 #ifndef ANDROID
                                 if (e2e_provider_->is_checked({its_service, its_method})) {
-                                    auto its_base = e2e_provider_->get_protection_base({its_service, its_method});
-                                    e2e_buffer its_buffer(_data + its_base, _data + _size);
-                                    e2e_provider_->check({its_service, its_method},
-                                            its_buffer, its_instance, its_check_status);
+                                    auto its_checked =
+                                            e2e_provider_->check({its_service, its_method}, buffer_view(_data, _size), its_instance);
+                                    its_check_status = its_checked.status;
     
                                     if (its_check_status != e2e::profile_interface::generic_check_status::E2E_OK) {
                                         VSOMEIP_INFO << "E2E protection: CRC check failed for service: "
@@ -1520,16 +1511,15 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
         if (e2e_provider_) {
 #ifndef ANDROID
             if (e2e_provider_->is_checked({its_service, its_method})) {
-                auto its_base = e2e_provider_->get_protection_base({its_service, its_method});
-                e2e_buffer its_buffer(_data + its_base, _data + _size);
-                e2e_provider_->check({its_service, its_method}, its_buffer, its_instance, its_check_status);
+                auto its_checked = e2e_provider_->check({its_service, its_method}, buffer_view(_data, _size), its_instance);
+                its_check_status = its_checked.status;
 
                 if (its_check_status != e2e::profile_interface::generic_check_status::E2E_OK) {
                     VSOMEIP_INFO << "E2E protection: CRC check failed for service: " << std::hex << its_service
                                  << " method: " << its_method;
                 }
 
-                its_stripped = strip_e2e_protected_payload(e2e_provider_, _data, _size);
+                its_stripped = strip_e2e_protected_payload(_data, _size, its_checked);
                 if (its_stripped) {
                     _data = its_stripped->data();
                     _size = static_cast<length_t>(its_stripped->size());
