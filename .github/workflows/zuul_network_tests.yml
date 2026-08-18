@@ -1,0 +1,62 @@
+# Full CMake master/slave network suite (Zuul compose harness).
+# Opt-in on PRs: add the `run-zuul` label. Not required, not on every push.
+
+name: Zuul Network Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zuul-network-tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  SANITIZER_TYPE: LEAK
+  VALGRIND_TYPE: ""
+  ENABLE_COVERAGE: "False"
+
+jobs:
+  network-tests:
+    name: CMake network tests
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-zuul')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Docker
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+
+      - name: Build and run network tests
+        run: |
+          set -euo pipefail
+          mkdir -p logs build-network-tests
+          docker compose --project-directory zuul/network-tests build
+          docker compose --project-directory zuul/network-tests up --abort-on-container-exit --exit-code-from master
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zuul-network-tests
+          path: |
+            logs/tests_result.json
+            logs/junit.tgz
+            logs/failed-junit.tgz
+            logs/failed-junit/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Tear down
+        if: always()
+        run: docker compose --project-directory zuul/network-tests down --volumes --remove-orphans || true

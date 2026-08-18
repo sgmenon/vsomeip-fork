@@ -1,0 +1,64 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# In-process client-id utility checks (single gtest binary, JSON via
+# VSOMEIP_CONFIGURATION). Multi-host client_id_test_*_ports suites stay on
+# the CMake / Docker path.
+
+load("@rules_cc//cc:cc_import.bzl", "cc_import")
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+# DT_NEEDED libvsomeip3-cfg.so.3: this binary calls plugin_manager for the
+# configuration plugin (CMake links ${VSOMEIP_NAME}-cfg).
+cc_import(
+    name = "vsomeip3-cfg-import",
+    shared_library = "//:vsomeip3-cfg",
+)
+
+_LINKOPTS = [
+    "-Wl,--no-as-needed",
+    "-Wl,-rpath,$$ORIGIN",
+]
+
+_DEPS = [
+    ":vsomeip3-cfg-import",
+    "//:vsomeip-lib",
+    "//:vsomeip-sd",
+    "//test/common:vsomeip_utilities",
+    "//test/network_tests:someip_test_globals",
+    "@googletest//:gtest",
+]
+
+# (name, json.in, size). CMake TIMEOUT 600 for masked_4095 is a hang budget;
+# the test itself is well under a minute.
+_CLIENT_ID_UTILITY_TESTS = [
+    ("client_id_test_utility", "conf/client_id_test_utility.json.in", "small"),
+    ("client_id_test_utility_masked_511", "conf/client_id_test_utility_masked_511.json.in", "small"),
+    ("client_id_test_utility_masked_4095", "conf/client_id_test_utility_masked_4095.json.in", "small"),
+    ("client_id_test_utility_masked_127", "conf/client_id_test_utility_masked_127.json.in", "small"),
+    ("client_id_test_utility_discontinuous_masked_511", "conf/client_id_test_utility_discontinuous_masked_511.json.in", "small"),
+]
+
+[
+    genrule(
+        name = name + "_json",
+        srcs = [src],
+        outs = [name + ".json"],
+        cmd = """awk 'NR==1{print; print "    \\"network\\": \\"%s\\","; next}1' $(SRCS) > $@""" % name,
+    )
+    for name, src, _size in _CLIENT_ID_UTILITY_TESTS
+]
+
+[
+    cc_test(
+        name = name,
+        size = size,
+        srcs = ["client_id_test_utility.cpp"],
+        data = [":" + name + "_json"],
+        env = {
+            "VSOMEIP_CONFIGURATION": "$(rootpath :" + name + "_json)",
+        },
+        linkopts = _LINKOPTS,
+        deps = _DEPS,
+    )
+    for name, _src, size in _CLIENT_ID_UTILITY_TESTS
+]

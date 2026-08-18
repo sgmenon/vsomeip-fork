@@ -1,0 +1,83 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# In-process application_test_single_process / application_test_availability
+# (one gtest binary each; CMake starters only set VSOMEIP_CONFIGURATION).
+# Multi-process application_test / application_test_multiple_init stay on
+# the CMake / Docker path.
+#
+# The test .cpp files #include other .cpp files. Those must be hdrs of a
+# cc_library so they reach the sandbox without being compiled as extra TUs.
+
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+
+cc_library(
+    name = "application_test_in_process_hdrs",
+    testonly = True,
+    hdrs = [
+        "application_test_client.cpp",
+        "application_test_client_availability.cpp",
+        "application_test_daemon.cpp",
+        "application_test_globals.hpp",
+        "application_test_service.cpp",
+    ],
+    includes = ["."],
+    deps = [
+        "//:vsomeip-lib",
+        "//test/common:vsomeip_utilities",
+        "//test/network_tests:someip_test_globals",
+        "@googletest//:gtest",
+    ],
+)
+
+_LINKOPTS = [
+    "-Wl,--no-as-needed",
+    "-Wl,-rpath,$$ORIGIN",
+]
+
+_DEPS = [
+    ":application_test_in_process_hdrs",
+    "//:vsomeip-lib",
+    "//:vsomeip-sd",
+    "//test/common:vsomeip_utilities",
+    "//test/network_tests:someip_test_globals",
+    "@googletest//:gtest",
+]
+
+# Two tests share the same CMake JSON; give each Bazel target its own
+# network name so parallel runs do not collide on /tmp/vsomeip-*.
+[
+    genrule(
+        name = name + "_json",
+        srcs = ["conf/application_test_single_process.json.in"],
+        outs = [name + ".json"],
+        cmd = """awk 'NR==1{print; print "    \\"network\\": \\"%s\\","; next}1' $(SRCS) > $@""" % name,
+    )
+    for name in [
+        "application_test_single_process",
+        "application_test_availability",
+    ]
+]
+
+cc_test(
+    name = "application_test_single_process",
+    size = "small",
+    srcs = ["application_test_single_process.cpp"],
+    data = [":application_test_single_process_json"],
+    env = {
+        "VSOMEIP_CONFIGURATION": "$(rootpath :application_test_single_process_json)",
+    },
+    linkopts = _LINKOPTS,
+    deps = _DEPS,
+)
+
+cc_test(
+    name = "application_test_availability",
+    size = "small",
+    srcs = ["application_test_availability.cpp"],
+    data = [":application_test_availability_json"],
+    env = {
+        "VSOMEIP_CONFIGURATION": "$(rootpath :application_test_availability_json)",
+    },
+    linkopts = _LINKOPTS,
+    deps = _DEPS,
+)

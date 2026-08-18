@@ -372,7 +372,7 @@
     "@@bazel-toolchains+//gcc_toolchain:toolchain_extension.bzl%gcc_toolchain_extension": {
       "general": {
         "bzlTransitiveDigest": "SD3Ychh6446qwqYpuxFpryno8QQ8A8Yzte5Uig0/wVM=",
-        "usagesDigest": "XaW2GY+Rh0PBoaP+PhL2EZ+qWeil03rHJzjk2IImWgc=",
+        "usagesDigest": "0XTReP3t/kWUNIKhAO7glkt3oTkwVLgd2lbOSgdOmQ8=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
         "envVariables": {},
@@ -407,6 +407,40 @@
               "fincludes": [],
               "target_arch": "aarch64",
               "gcc_version": "11.3.0",
+              "toolchain_workspace_name": "bazel-toolchains",
+              "path_to_toolchain": "gcc_toolchain"
+            }
+          },
+          "gcc_toolchain_x86_64-gcc13": {
+            "repoRuleId": "@@bazel-toolchains+//gcc_toolchain:gcc_defs.bzl%gcc_toolchain",
+            "attributes": {
+              "binary_prefix": "",
+              "extra_cflags": [],
+              "extra_cxxflags": [],
+              "extra_fflags": [],
+              "extra_ldflags": [],
+              "extra_asmflags": [],
+              "includes": [],
+              "fincludes": [],
+              "target_arch": "x86_64",
+              "gcc_version": "13.4.0",
+              "toolchain_workspace_name": "bazel-toolchains",
+              "path_to_toolchain": "gcc_toolchain"
+            }
+          },
+          "gcc_toolchain_aarch64-gcc13": {
+            "repoRuleId": "@@bazel-toolchains+//gcc_toolchain:gcc_defs.bzl%gcc_toolchain",
+            "attributes": {
+              "binary_prefix": "aarch64-linux-",
+              "extra_cflags": [],
+              "extra_cxxflags": [],
+              "extra_fflags": [],
+              "extra_ldflags": [],
+              "extra_asmflags": [],
+              "includes": [],
+              "fincludes": [],
+              "target_arch": "aarch64",
+              "gcc_version": "13.4.0",
               "toolchain_workspace_name": "bazel-toolchains",
               "path_to_toolchain": "gcc_toolchain"
             }

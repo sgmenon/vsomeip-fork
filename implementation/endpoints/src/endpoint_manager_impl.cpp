@@ -1261,9 +1261,18 @@ bool endpoint_manager_impl::is_used_endpoint(endpoint* const _endpoint) const {
 
 void endpoint_manager_impl::suspend() {
     std::vector<std::weak_ptr<endpoint>> weak_endpoints;
+    // StopOffer/StopSubscribe are queued on the SD UDP socket and sent
+    // asynchronously. Closing that socket here races the send and drops the
+    // messages ("send_queued: skipped, no socket!"), so remote peers never see
+    // the stop and only notice the offer TTL expiry. Leave SD up; resume()
+    // still restarts every server endpoint.
+    const uint16_t sd_port = configuration_->is_sd_enabled() ? configuration_->get_sd_port() : uint16_t{0};
 
     {
         for (const auto& [its_port, protocols] : server_endpoints_) {
+            if (sd_port != 0 && its_port == sd_port) {
+                continue;
+            }
             for (const auto& [its_protocol, its_endpoint] : protocols) {
                 weak_endpoints.push_back(its_endpoint);
             }

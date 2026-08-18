@@ -1,0 +1,35 @@
+# Copyright (C) 2026 GM GLOBAL TECHNOLOGY OPERATIONS LLC ALL RIGHTS RESERVED.
+#
+# In-process offer_test_multiple_offerings (daemon + servers + client in one
+# gtest binary). Starter-script / multi-host offer_test_* suites stay on the
+# CMake / Docker path.
+
+load("@rules_cc//cc:defs.bzl", "cc_test")
+
+# Inject a unique "network" so /tmp/vsomeip-* sockets do not collide with
+# other bazel tests. JSON has no @VAR@ substitutions.
+genrule(
+    name = "offer_test_multiple_offerings_json",
+    srcs = ["conf/offer_test_multiple_offerings.json.in"],
+    outs = ["offer_test_multiple_offerings.json"],
+    cmd = """awk 'NR==1{print; print "    \\"network\\": \\"offer_test_multiple_offerings\\","; next}1' $(SRCS) > $@""",
+)
+
+cc_test(
+    name = "offer_test_multiple_offerings",
+    size = "small",
+    srcs = ["offer_test_multiple_offerings.cpp"],
+    data = [":offer_test_multiple_offerings_json"],
+    env = {
+        "VSOMEIP_CONFIGURATION": "$(rootpath :offer_test_multiple_offerings_json)",
+    },
+    linkopts = [
+        "-Wl,--no-as-needed",
+        "-Wl,-rpath,$$ORIGIN",
+    ],
+    deps = [
+        "//:vsomeip-lib",
+        "//:vsomeip-sd",
+        "@googletest//:gtest",
+    ],
+)

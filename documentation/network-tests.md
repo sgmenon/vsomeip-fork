@@ -5,6 +5,7 @@ This page will guide you to accomplish that goal.
 
 - [Prerequisites](#prerequisites)
 - [Main steps](#main-steps)
+- [GitHub Actions](#github-actions)
 - [FAQ](#faq)
 
 ## Prerequisites
@@ -80,6 +81,14 @@ This page will guide you to accomplish that goal.
    docker compose --project-directory zuul/network-tests up
    ```
 
+## GitHub Actions
+
+The full CMake suite is **not** on every PR. Add the `run-zuul` label to run
+[Zuul Network Tests](../.github/workflows/zuul_network_tests.yml) (LeakSanitizer,
+same compose harness as above). You can also run it from the Actions tab
+(`workflow_dispatch`). Typical wall time is tens of minutes; the job ceiling is
+4 hours.
+
 ## FAQ
 
 **Question**: I get a strange CMake error when I start the containers
@@ -90,7 +99,14 @@ If you still point `BUILD_DIR` at an existing cache, delete that directory and r
 
 **Question**: I'd like to run only a subset of the network-tests
 
-Locate the CMakePresets.json file and add a "filter" entry inside the preset named ci-network-tests below "execution", like so:
+Set `STRESS_LABELS` before `up` (CTest `--tests-regex`):
+
+```bash
+export STRESS_LABELS='["ctest-include:cyclic_event_test|suspend_resume_test_initial"]'
+docker compose --project-directory zuul/network-tests up
+```
+
+Or locate the CMakePresets.json file and add a "filter" entry inside the preset named ci-network-tests below "execution", like so:
 
 ```json
     "filter": {

@@ -13,6 +13,7 @@ networks:
             slave_2nd: &slave-2nd 169.254.87.42
 
 x-common: &common
+  image: vsomeip-network-tests:local
   build:
     args:
       - http_proxy

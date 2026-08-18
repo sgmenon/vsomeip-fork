@@ -240,7 +240,9 @@ private:
 };
 
 TEST(offer_test, multiple_offerings_same_service) {
-    setenv("VSOMEIP_CONFIGURATION", "offer_test_multiple_offerings.json", 1);
+    // overwrite=0 so a pre-set path (Bazel `env`) wins; CMake still sets the
+    // relative name when VSOMEIP_CONFIGURATION is unset and cwd has the JSON.
+    setenv("VSOMEIP_CONFIGURATION", "offer_test_multiple_offerings.json", 0);
     const service_t service_id{0xfee2};
     const instance_t instance_id{0x0001};
     const major_version_t major{1};
