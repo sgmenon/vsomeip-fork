@@ -3450,7 +3450,8 @@ void routing_manager_impl::set_routing_state(routing_state_e _routing_state) {
                 }
             }
 
-            // stop all server endpoints
+            // Stop application server endpoints. The SD endpoint is left running
+            // so queued StopOffer/StopSubscribe can still leave the host.
             ep_mgr_->suspend();
 
             VSOMEIP_INFO << "rmi::" << __func__ << " Set routing to suspend mode done, diagnosis mode is "

@@ -21,10 +21,19 @@ TEST(CyclicEventTest, ServiceNotifiesClient) {
     std::promise<bool> shutdown_promise;
     auto shutdown_future = shutdown_promise.get_future();
 
+    // Handlers are owned by the application; capture a weak_ptr so they do not
+    // keep the application alive after stop().
+    std::weak_ptr<vsomeip::application> application_weak{application};
+
     // Handle a shutdown method call.
     application->register_message_handler(SERVICE_ID, INSTANCE_ID, METHOD_ID,
-                                          [runtime, application, &shutdown_promise](const std::shared_ptr<vsomeip::message> message) {
+                                          [runtime, application_weak, &shutdown_promise](const std::shared_ptr<vsomeip::message> message) {
                                               VSOMEIP_INFO << "Received shutdown request.";
+
+                                              auto application = application_weak.lock();
+                                              if (!application) {
+                                                  return;
+                                              }
 
                                               auto response = runtime->create_response(message);
                                               application->send(response);

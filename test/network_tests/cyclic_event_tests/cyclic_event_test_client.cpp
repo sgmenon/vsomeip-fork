@@ -24,14 +24,23 @@ TEST(CyclicEventTest, ClientReceivesMultipleEvents) {
     // Track amount of notifications that were received.
     std::atomic_uint8_t notification_count{0};
 
+    // Handlers are owned by the application; capture a weak_ptr so they do not
+    // keep the application alive after stop().
+    std::weak_ptr<vsomeip::application> application_weak{application};
+
     // Handle an event notification.
     application->register_message_handler(
             SERVICE_ID, INSTANCE_ID, EVENT_ID,
-            [runtime, application, &notification_count](const std::shared_ptr<vsomeip::message> /* message */) {
+            [runtime, application_weak, &notification_count](const std::shared_ptr<vsomeip::message> /* message */) {
                 VSOMEIP_INFO << "Received event notification.";
 
                 constexpr std::uint8_t MIN_NOTIFICATION_COUNT = 3;
                 if ((notification_count += 1) != MIN_NOTIFICATION_COUNT) {
+                    return;
+                }
+
+                auto application = application_weak.lock();
+                if (!application) {
                     return;
                 }
 
@@ -57,8 +66,9 @@ TEST(CyclicEventTest, ClientReceivesMultipleEvents) {
     // Subscribe to the test service when it becomes available.
     application->register_availability_handler(
             SERVICE_ID, INSTANCE_ID,
-            [application](vsomeip::service_t /* service */, vsomeip::instance_t /* instance */, bool is_available) {
-                if (is_available) {
+            [application_weak](vsomeip::service_t /* service */, vsomeip::instance_t /* instance */, bool is_available) {
+                auto application = application_weak.lock();
+                if (application && is_available) {
                     application->subscribe(SERVICE_ID, INSTANCE_ID, EVENTGROUP_ID, MAJOR_VERSION);
                 }
             },

@@ -6,13 +6,9 @@
 #   //test/network_tests/fake_socket_tests:fake_socket_tests
 #   //test/network_tests/header_factory_tests:header_factory_test
 #   //test/network_tests/configuration_tests:configuration_test
-#
-# Network / integration tests for vsomeip.
-#
-# In-process / unit-style suites (run via `bazel test`):
-#   //test/network_tests/fake_socket_tests:fake_socket_tests
-#   //test/network_tests/header_factory_tests:header_factory_test
-#   //test/network_tests/configuration_tests:configuration_test
+#   //test/network_tests/client_id_tests:all
+#   //test/network_tests/offer_tests:offer_test_multiple_offerings
+#   //test/network_tests/application_tests:all
 #
 # Multi-host suites are NOT `bazel test` targets. Build a pkg_tar on the host,
 # then run via Docker Compose:
@@ -25,6 +21,14 @@
 load("@rules_cc//cc:defs.bzl", "cc_library")
 
 package(default_visibility = ["//test:__subpackages__"])
+
+# Shared with in-process tests that call routing_manager_client::stop()
+# (condition_variable::wait_for). See tsan-suppressions.txt.
+filegroup(
+    name = "tsan_suppressions",
+    testonly = True,
+    srcs = ["tsan-suppressions.txt"],
+)
 
 cc_library(
     name = "someip_test_globals",
