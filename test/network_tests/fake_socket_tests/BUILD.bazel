@@ -5,19 +5,13 @@
 #   test/network_tests/fake_socket_tests/CMakeLists.txt
 
 load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//test/network_tests:tsan.bzl", "TSAN_OPTIONS", "TSAN_SUPPRESSIONS")
 
 # JSON has no @VAR@ substitutions; ship the .in content as the runtime config.
 filegroup(
     name = "fake_socket_configs",
     testonly = True,
     srcs = ["conf/multiple_client_one_process.json.in"],
-)
-
-# Suppress known libtsan + libstdc++ wait_for false positives (see file).
-filegroup(
-    name = "tsan_suppressions",
-    testonly = True,
-    srcs = ["tsan-suppressions.txt"],
 )
 
 cc_test(
@@ -30,12 +24,12 @@ cc_test(
     # use_configuration() setenv(..., overwrite=0), so a pre-set path wins.
     data = [
         ":fake_socket_configs",
-        ":tsan_suppressions",
+        TSAN_SUPPRESSIONS,
     ],
     env = {
-        "VSOMEIP_CONFIGURATION": "$(rootpath :fake_socket_configs)",
         # Overrides --config=tsan action_env; keep halt_on_error and add suppressions.
-        "TSAN_OPTIONS": "verbosity=3:halt_on_error=1:second_deadlock_stack=1:suppressions=$(rootpath :tsan_suppressions)",
+        "TSAN_OPTIONS": TSAN_OPTIONS,
+        "VSOMEIP_CONFIGURATION": "$(rootpath :fake_socket_configs)",
     },
     includes = [
         ".",

@@ -6,6 +6,7 @@
 
 load("@rules_cc//cc:cc_import.bzl", "cc_import")
 load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//test/network_tests:tsan.bzl", "TSAN_OPTIONS", "TSAN_SUPPRESSIONS")
 
 # DT_NEEDED libvsomeip3-cfg.so.3: this binary calls plugin_manager for the
 # configuration plugin (CMake links ${VSOMEIP_NAME}-cfg).
@@ -53,8 +54,12 @@ _CLIENT_ID_UTILITY_TESTS = [
         name = name,
         size = size,
         srcs = ["client_id_test_utility.cpp"],
-        data = [":" + name + "_json"],
+        data = [
+            ":" + name + "_json",
+            TSAN_SUPPRESSIONS,
+        ],
         env = {
+            "TSAN_OPTIONS": TSAN_OPTIONS,
             "VSOMEIP_CONFIGURATION": "$(rootpath :" + name + "_json)",
         },
         linkopts = _LINKOPTS,

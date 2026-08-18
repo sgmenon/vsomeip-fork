@@ -22,6 +22,14 @@ load("@rules_cc//cc:defs.bzl", "cc_library")
 
 package(default_visibility = ["//test:__subpackages__"])
 
+# Shared with in-process tests that call routing_manager_client::stop()
+# (condition_variable::wait_for). See tsan-suppressions.txt.
+filegroup(
+    name = "tsan_suppressions",
+    testonly = True,
+    srcs = ["tsan-suppressions.txt"],
+)
+
 cc_library(
     name = "someip_test_globals",
     testonly = True,

@@ -5,6 +5,7 @@
 # CMake / Docker path.
 
 load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//test/network_tests:tsan.bzl", "TSAN_OPTIONS", "TSAN_SUPPRESSIONS")
 
 # Inject a unique "network" so /tmp/vsomeip-* sockets do not collide with
 # other bazel tests. JSON has no @VAR@ substitutions.
@@ -19,8 +20,12 @@ cc_test(
     name = "offer_test_multiple_offerings",
     size = "small",
     srcs = ["offer_test_multiple_offerings.cpp"],
-    data = [":offer_test_multiple_offerings_json"],
+    data = [
+        ":offer_test_multiple_offerings_json",
+        TSAN_SUPPRESSIONS,
+    ],
     env = {
+        "TSAN_OPTIONS": TSAN_OPTIONS,
         "VSOMEIP_CONFIGURATION": "$(rootpath :offer_test_multiple_offerings_json)",
     },
     linkopts = [

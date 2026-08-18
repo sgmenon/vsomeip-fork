@@ -9,6 +9,7 @@
 # cc_library so they reach the sandbox without being compiled as extra TUs.
 
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//test/network_tests:tsan.bzl", "TSAN_OPTIONS", "TSAN_SUPPRESSIONS")
 
 cc_library(
     name = "application_test_in_process_hdrs",
@@ -62,8 +63,12 @@ cc_test(
     name = "application_test_single_process",
     size = "small",
     srcs = ["application_test_single_process.cpp"],
-    data = [":application_test_single_process_json"],
+    data = [
+        ":application_test_single_process_json",
+        TSAN_SUPPRESSIONS,
+    ],
     env = {
+        "TSAN_OPTIONS": TSAN_OPTIONS,
         "VSOMEIP_CONFIGURATION": "$(rootpath :application_test_single_process_json)",
     },
     linkopts = _LINKOPTS,
@@ -74,8 +79,12 @@ cc_test(
     name = "application_test_availability",
     size = "small",
     srcs = ["application_test_availability.cpp"],
-    data = [":application_test_availability_json"],
+    data = [
+        ":application_test_availability_json",
+        TSAN_SUPPRESSIONS,
+    ],
     env = {
+        "TSAN_OPTIONS": TSAN_OPTIONS,
         "VSOMEIP_CONFIGURATION": "$(rootpath :application_test_availability_json)",
     },
     linkopts = _LINKOPTS,
