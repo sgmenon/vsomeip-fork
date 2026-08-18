@@ -25,11 +25,20 @@ public:
 
     buffer_view(const e2e_buffer& _buffer, size_t _begin, size_t _end) : data_ptr_(_buffer.data() + _begin), data_length_(_end - _begin) { }
 
+    buffer_view(const buffer_view& _view, size_t _length) : data_ptr_(_view.data_ptr_), data_length_(_length) { }
+
+    buffer_view(const buffer_view& _view, size_t _begin, size_t _end) :
+        data_ptr_(_view.data_ptr_ + _begin), data_length_(_end - _begin) { }
+
     const uint8_t* begin(void) const { return data_ptr_; }
 
     const uint8_t* end(void) const { return data_ptr_ + data_length_; }
 
     size_t data_length(void) const { return data_length_; }
+
+    size_t size(void) const { return data_length_; }
+
+    const uint8_t& operator[](size_t _index) const { return data_ptr_[_index]; }
 
 private:
     const uint8_t* data_ptr_;

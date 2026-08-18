@@ -38,60 +38,31 @@ public:
     VSOMEIP_EXPORT bool is_protected(e2exf::data_identifier_t id) const override;
     VSOMEIP_EXPORT bool is_checked(e2exf::data_identifier_t id) const override;
 
-    VSOMEIP_EXPORT std::size_t get_protection_base(e2exf::data_identifier_t _id) const override;
-
-    VSOMEIP_EXPORT protect_result protect_parts(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) override;
-    VSOMEIP_EXPORT void check(e2exf::data_identifier_t id, const e2e_buffer& _buffer, instance_t _instance,
-                              profile_interface::check_status_t& _generic_check_status) override;
-    VSOMEIP_EXPORT bool get_unprotected_payload(e2exf::data_identifier_t id, buffer_view _protected_area,
-                                                span<const uint8_t>& _out) const override;
+    VSOMEIP_EXPORT protect_result protect(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) override;
+    VSOMEIP_EXPORT check_result check(e2exf::data_identifier_t id, buffer_view _message, instance_t _instance) override;
 
 private:
     std::map<e2exf::data_identifier_t, std::shared_ptr<profile_interface::protector>> custom_protectors_;
     std::map<e2exf::data_identifier_t, std::shared_ptr<profile_interface::checker>> custom_checkers_;
     std::map<e2exf::data_identifier_t, std::size_t> custom_bases_;
-    // Byte offset of app payload within the protected area (after E2E header/fields).
-    std::map<e2exf::data_identifier_t, std::size_t> custom_payload_starts_;
-    // Trailing E2E footer bytes to exclude from the app payload view.
-    std::map<e2exf::data_identifier_t, std::size_t> custom_payload_footers_;
 
     template<typename config_t>
     config_t make_e2e_profile_config(const std::shared_ptr<cfg::e2e>& config);
-
-    static std::size_t payload_start(const profile01::profile_config& _config) {
-        return std::max({static_cast<std::size_t>(_config.crc_offset_) + 1U, static_cast<std::size_t>(_config.counter_offset_ / 8) + 1U,
-                         static_cast<std::size_t>(_config.data_id_nibble_offset_ / 8) + 1U});
-    }
-    static std::size_t payload_start(const profile04::profile_config& _config) { return _config.offset_ + 12U; }
-    static std::size_t payload_start(const profile05::profile_config& _config) { return _config.offset_ + 3U; }
-    static std::size_t payload_start(const profile07::profile_config& _config) { return _config.offset_ + 20U; }
-    static std::size_t payload_start(const profile_custom::profile_config& _config) {
-        return static_cast<std::size_t>(_config.crc_offset_) + 4U;
-    }
-    static std::size_t payload_footer(const profile01::profile_config&) { return 0; }
-    static std::size_t payload_footer(const profile04::profile_config&) { return 0; }
-    static std::size_t payload_footer(const profile05::profile_config&) { return 0; }
-    static std::size_t payload_footer(const profile07::profile_config&) { return 0; }
-    static std::size_t payload_footer(const profile_custom::profile_config&) { return 0; }
 
     template<typename config_t, typename checker_t, typename protector_t>
     void process_e2e_profile(std::shared_ptr<cfg::e2e> config) {
         const e2exf::data_identifier_t data_identifier = {config->service_id, config->event_id};
         config_t profile_config = make_e2e_profile_config<config_t>(config);
 
-        std::shared_ptr<e2e::profile_interface::checker> checker;
         if ((config->variant == "checker") || (config->variant == "both")) {
             custom_checkers_[data_identifier] = std::make_shared<checker_t>(profile_config);
         }
 
-        std::shared_ptr<e2e::profile_interface::protector> protector;
         if ((config->variant == "protector") || (config->variant == "both")) {
             custom_protectors_[data_identifier] = std::make_shared<protector_t>(profile_config);
         }
 
         custom_bases_[data_identifier] = profile_config.base_;
-        custom_payload_starts_[data_identifier] = payload_start(profile_config);
-        custom_payload_footers_[data_identifier] = payload_footer(profile_config);
     }
 };
 

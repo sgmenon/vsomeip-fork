@@ -103,47 +103,29 @@ bool e2e_provider_impl::is_checked(e2exf::data_identifier_t id) const {
     return custom_checkers_.count(id) > 0;
 }
 
-std::size_t e2e_provider_impl::get_protection_base(e2exf::data_identifier_t id) const {
-    const auto found_base = custom_bases_.find(id);
-    if (found_base != custom_bases_.end())
-        return found_base->second;
-
-    return 0;
-}
-
-protect_result e2e_provider_impl::protect_parts(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) {
+protect_result e2e_provider_impl::protect(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) {
     auto protector = custom_protectors_.find(id);
     if (protector != custom_protectors_.end()) {
-        return protector->second->protect_parts(app_payload, instance);
+        return protector->second->protect(app_payload, instance);
     }
     return protect_result{};
 }
 
-void e2e_provider_impl::check(e2exf::data_identifier_t id, const e2e_buffer& _buffer, instance_t _instance,
-                              profile_interface::check_status_t& _generic_check_status) {
+check_result e2e_provider_impl::check(e2exf::data_identifier_t id, buffer_view _message, instance_t _instance) {
     auto checker = custom_checkers_.find(id);
-    if (checker != custom_checkers_.end()) {
-        checker->second->check(_buffer, _instance, _generic_check_status);
-    }
-}
-
-bool e2e_provider_impl::get_unprotected_payload(e2exf::data_identifier_t id, buffer_view _protected_area,
-                                                span<const uint8_t>& _out) const {
-    const auto found = custom_payload_starts_.find(id);
-    if (found == custom_payload_starts_.end()) {
-        return false;
+    if (checker == custom_checkers_.end()) {
+        return check_result{};
     }
 
-    const std::size_t its_start = found->second;
-    std::size_t its_footer = 0;
-    if (const auto found_footer = custom_payload_footers_.find(id); found_footer != custom_payload_footers_.end()) {
-        its_footer = found_footer->second;
+    std::size_t its_base = 0;
+    if (const auto found_base = custom_bases_.find(id); found_base != custom_bases_.end()) {
+        its_base = found_base->second;
     }
-    if (_protected_area.data_length() < its_start + its_footer) {
-        return false;
+    if (_message.data_length() < its_base) {
+        return check_result{};
     }
-    _out = span<const uint8_t>(_protected_area.begin() + its_start, _protected_area.data_length() - its_start - its_footer);
-    return true;
+
+    return checker->second->check(buffer_view(_message.begin() + its_base, _message.data_length() - its_base), _instance);
 }
 
 template<>

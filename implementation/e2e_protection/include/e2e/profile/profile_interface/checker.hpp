@@ -9,9 +9,9 @@
 #include <mutex>
 
 #include <vsomeip/primitive_types.hpp>
-#include <vsomeip/span.hpp>
 
 #include "../profile_interface/profile_interface.hpp"
+#include "../protect_result.hpp"
 #include "../../../buffer/buffer.hpp"
 
 namespace vsomeip_v3 {
@@ -20,18 +20,9 @@ namespace profile_interface {
 
 class checker : public profile_interface {
 public:
-    virtual void check(const e2e_buffer& _buffer, instance_t _instance, check_status_t& _generic_check_status) = 0;
-
-    /**
-     * Non-owning view of the app payload within a contiguous protected area
-     * (E2E header and footer stripped). Returns false if the buffer is too short
-     * for this profile layout.
-     */
-    virtual bool get_unprotected_payload(buffer_view _protected_area, span<const uint8_t>& _out) const {
-        (void)_protected_area;
-        (void)_out;
-        return false;
-    }
+    // `_buffer` is the protected area (after SOME/IP base). Spans in the
+    // result point into that view.
+    virtual check_result check(buffer_view _buffer, instance_t _instance) = 0;
 };
 
 } // namespace profile_interface

@@ -6,6 +6,8 @@
 #ifndef VSOMEIP_V3_E2E_PROFILE01_CHECKER_HPP
 #define VSOMEIP_V3_E2E_PROFILE01_CHECKER_HPP
 
+#include <algorithm>
+
 #include "../profile01/profile_01.hpp"
 #include "../profile_interface/checker.hpp"
 
@@ -18,13 +20,16 @@ class profile_01_checker final : public e2e::profile_interface::checker {
 public:
     profile_01_checker(void) = delete;
 
-    // [SWS_E2E_00389] initialize state
     explicit profile_01_checker(const profile_config& _config) : config_(_config) { }
 
-    void check(const e2e_buffer& _buffer, instance_t _instance,
-               e2e::profile_interface::check_status_t& _generic_check_status) override final;
+    check_result check(buffer_view _buffer, instance_t _instance) override final;
 
 private:
+    static std::size_t header_size(const profile_config& _config) {
+        return std::max({static_cast<std::size_t>(_config.crc_offset_) + 1U, static_cast<std::size_t>(_config.counter_offset_ / 8) + 1U,
+                         static_cast<std::size_t>(_config.data_id_nibble_offset_ / 8) + 1U});
+    }
+
     profile_config config_;
     std::mutex check_mutex_;
 };

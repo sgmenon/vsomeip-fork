@@ -24,9 +24,9 @@ struct profile_config;
 
 class profile_05 {
 public:
-    static uint16_t compute_crc(const profile_config& _config, const e2e_buffer& _buffer);
+    static uint16_t compute_crc(const profile_config& _config, const buffer_view& _buffer);
 
-    static bool is_buffer_length_valid(const profile_config& _config, const e2e_buffer& _buffer);
+    static bool is_buffer_length_valid(const profile_config& _config, const buffer_view& _buffer);
 };
 
 struct profile_config {

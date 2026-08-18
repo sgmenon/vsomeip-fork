@@ -28,6 +28,8 @@ namespace {
 
 using vsomeip_v3::buffer_view;
 using vsomeip_v3::e2e_buffer;
+using vsomeip_v3::e2e::check_result;
+using vsomeip_v3::e2e::make_check_result;
 using vsomeip_v3::e2e::protect_result;
 using vsomeip_v3::e2e::profile_interface::generic_check_status;
 
@@ -69,11 +71,29 @@ void expect_scatter(const protect_result& _parts, std::size_t _header_size, cons
     EXPECT_EQ(_parts.size(), _header_size + _app.size() + _footer_size);
 }
 
+void expect_check_sections(const check_result& _checked, const e2e_buffer& _protected, std::size_t _header_size, const e2e_buffer& _app,
+                           std::size_t _footer_size = 0) {
+    EXPECT_EQ(_checked.e2e_header.size(), _header_size);
+    EXPECT_EQ(_checked.app_payload.size(), _app.size());
+    EXPECT_EQ(_checked.e2e_footer.size(), _footer_size);
+    EXPECT_TRUE(std::equal(_checked.app_payload.begin(), _checked.app_payload.end(), _app.begin()));
+
+    if (!_checked.e2e_header.empty()) {
+        EXPECT_EQ(_checked.e2e_header.data(), _protected.data());
+    } else if (!_checked.app_payload.empty()) {
+        EXPECT_EQ(_checked.app_payload.data(), _protected.data());
+    }
+    if (!_checked.e2e_footer.empty()) {
+        EXPECT_EQ(_checked.e2e_footer.data(), _protected.data() + _protected.size() - _footer_size);
+    }
+}
+
 template<typename Checker>
-void expect_check_ok(Checker& _checker, const e2e_buffer& _protected, vsomeip_v3::instance_t _instance = k_instance) {
-    vsomeip_v3::e2e::profile_interface::check_status_t status = generic_check_status::E2E_ERROR;
-    _checker.check(_protected, _instance, status);
-    EXPECT_EQ(status, generic_check_status::E2E_OK);
+void expect_check_ok(Checker& _checker, const e2e_buffer& _protected, std::size_t _header_size, const e2e_buffer& _app,
+                     std::size_t _footer_size = 0, vsomeip_v3::instance_t _instance = k_instance) {
+    const auto checked = _checker.check(buffer_view(_protected), _instance);
+    EXPECT_EQ(checked.status, generic_check_status::E2E_OK);
+    expect_check_sections(checked, _protected, _header_size, _app, _footer_size);
 }
 
 TEST(protect_result_test, size_sums_header_payload_and_footer) {
@@ -84,20 +104,20 @@ TEST(protect_result_test, size_sums_header_payload_and_footer) {
     EXPECT_EQ(parts.size(), 36U);
 }
 
-TEST(protect_parts_profile04, offset_zero_scatters_header_and_payload) {
+TEST(protect_profile04, offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile04::profile_config config(/*data_id=*/0x2d, /*offset=*/0, /*min=*/0, /*max=*/0xffff,
                                                       /*max_delta=*/0xffff);
     vsomeip_v3::e2e::profile04::protector protector(config);
     vsomeip_v3::e2e::profile04::profile_04_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, 12, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), 12, app);
 }
 
-TEST(protect_parts_profile04, nonzero_offset_padding_lives_in_header) {
+TEST(protect_profile04, nonzero_offset_padding_lives_in_header) {
     constexpr std::size_t offset = 8;
     vsomeip_v3::e2e::profile04::profile_config config(/*data_id=*/0x2d, offset, /*min=*/0, /*max=*/0xffff,
                                                       /*max_delta=*/0xffff);
@@ -105,16 +125,16 @@ TEST(protect_parts_profile04, nonzero_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile04::profile_04_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, offset + 12, app);
     for (std::size_t i = 0; i < offset; ++i) {
         EXPECT_EQ((*parts.e2e_header)[i], 0);
     }
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), offset + 12, app);
 }
 
-TEST(protect_parts_profile05, offset_zero_scatters_header_and_payload) {
+TEST(protect_profile05, offset_zero_scatters_header_and_payload) {
     // data_length is bits; (56/8)+1=8 must be <= protected size (3+payload).
     vsomeip_v3::e2e::profile05::profile_config config(/*data_id=*/0x2d, /*data_length=*/56, /*offset=*/0,
                                                       /*max_delta=*/0xffff);
@@ -122,13 +142,13 @@ TEST(protect_parts_profile05, offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile05::profile_05_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, 3, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), 3, app);
 }
 
-TEST(protect_parts_profile05, nonzero_offset_padding_lives_in_header) {
+TEST(protect_profile05, nonzero_offset_padding_lives_in_header) {
     constexpr std::size_t offset = 4;
     vsomeip_v3::e2e::profile05::profile_config config(/*data_id=*/0x2d, /*data_length=*/56, offset,
                                                       /*max_delta=*/0xffff);
@@ -136,26 +156,26 @@ TEST(protect_parts_profile05, nonzero_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile05::profile_05_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, offset + 3, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), offset + 3, app);
 }
 
-TEST(protect_parts_profile07, offset_zero_scatters_header_and_payload) {
+TEST(protect_profile07, offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile07::profile_config config(/*data_id=*/0x2d, /*offset=*/0, /*min=*/0, /*max=*/0xffff,
                                                       /*max_delta=*/0xffffffffu);
     vsomeip_v3::e2e::profile07::protector protector(config);
     vsomeip_v3::e2e::profile07::profile_07_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, 20, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), 20, app);
 }
 
-TEST(protect_parts_profile07, nonzero_offset_padding_lives_in_header) {
+TEST(protect_profile07, nonzero_offset_padding_lives_in_header) {
     constexpr std::size_t offset = 8;
     vsomeip_v3::e2e::profile07::profile_config config(/*data_id=*/0x2d, offset, /*min=*/0, /*max=*/0xffff,
                                                       /*max_delta=*/0xffffffffu);
@@ -163,38 +183,38 @@ TEST(protect_parts_profile07, nonzero_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile07::profile_07_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, offset + 20, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), offset + 20, app);
 }
 
-TEST(protect_parts_profile_custom, crc_offset_zero_scatters_header_and_payload) {
+TEST(protect_profile_custom, crc_offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile_custom::profile_config config(/*crc_offset=*/0);
     vsomeip_v3::e2e::profile_custom::protector protector(config);
     vsomeip_v3::e2e::profile_custom::profile_custom_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, 4, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), 4, app);
 }
 
-TEST(protect_parts_profile_custom, nonzero_crc_offset_padding_lives_in_header) {
+TEST(protect_profile_custom, nonzero_crc_offset_padding_lives_in_header) {
     constexpr std::uint16_t crc_offset = 8;
     vsomeip_v3::e2e::profile_custom::profile_config config(crc_offset);
     vsomeip_v3::e2e::profile_custom::protector protector(config);
     vsomeip_v3::e2e::profile_custom::profile_custom_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, crc_offset + 4, app);
-    expect_check_ok(checker, flatten(parts));
+    expect_check_ok(checker, flatten(parts), crc_offset + 4, app);
 }
 
-TEST(protect_parts_profile01, packed_data_lives_in_payload) {
+TEST(protect_profile01, packed_data_lives_in_payload) {
     // Matches docker e2e_crc CRC8 sample: 56-bit data length, DATAID_NIBBLE.
     using vsomeip_v3::e2e::profile01::p01_data_id_mode;
     vsomeip_v3::e2e::profile01::profile_config config(/*crc_offset=*/0, /*data_id=*/0xA73, p01_data_id_mode::E2E_P01_DATAID_NIBBLE,
@@ -203,23 +223,27 @@ TEST(protect_parts_profile01, packed_data_lives_in_payload) {
     vsomeip_v3::e2e::profile01::profile_01_checker checker(config);
 
     const auto app = make_app_payload(6);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     ASSERT_TRUE(parts.valid);
     EXPECT_TRUE(!parts.e2e_header || parts.e2e_header->empty());
     EXPECT_TRUE(!parts.e2e_footer || parts.e2e_footer->empty());
     ASSERT_NE(parts.app_payload, nullptr);
     EXPECT_EQ(parts.app_payload->size(), 8U);
-    expect_check_ok(checker, *parts.app_payload);
+
+    // Check still surfaces the in-band CRC/counter/nibble as e2e_header so strip
+    // can drop them even though protect packed those fields into app_payload.
+    constexpr std::size_t p01_header = 2;
+    expect_check_ok(checker, *parts.app_payload, p01_header, app);
 }
 
-TEST(protect_parts_profile04, invalid_when_payload_exceeds_max_length) {
+TEST(protect_profile04, invalid_when_payload_exceeds_max_length) {
     vsomeip_v3::e2e::profile04::profile_config config(/*data_id=*/0x2d, /*offset=*/0, /*min=*/0, /*max=*/16,
                                                       /*max_delta=*/0xffff);
     vsomeip_v3::e2e::profile04::protector protector(config);
 
     const auto app = make_app_payload(20); // 12 + 20 > max 16
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
     EXPECT_FALSE(parts.valid);
 }
 
@@ -233,7 +257,7 @@ std::shared_ptr<e2e_buffer> crc32_be(buffer_view _data) {
     return out;
 }
 
-uint32_t read_crc32_be(const e2e_buffer& _buf, std::size_t _off) {
+uint32_t read_crc32_be(buffer_view _buf, std::size_t _off) {
     return (static_cast<uint32_t>(_buf[_off]) << 24U) | (static_cast<uint32_t>(_buf[_off + 1U]) << 16U)
             | (static_cast<uint32_t>(_buf[_off + 2U]) << 8U) | static_cast<uint32_t>(_buf[_off + 3U]);
 }
@@ -241,7 +265,7 @@ uint32_t read_crc32_be(const e2e_buffer& _buf, std::size_t _off) {
 // Example profile: optional 1-byte header (counter) + payload + 4-byte CRC footer.
 class crc_footer_protector : public vsomeip_v3::e2e::profile_interface::protector {
 public:
-    protect_result protect_parts(buffer_view _app_payload, vsomeip_v3::instance_t) override {
+    protect_result protect(buffer_view _app_payload, vsomeip_v3::instance_t) override {
         protect_result parts;
         parts.e2e_header = std::make_shared<e2e_buffer>(1, counter_++);
         parts.app_payload = std::make_shared<e2e_buffer>(_app_payload.begin(), _app_payload.end());
@@ -256,47 +280,46 @@ private:
 
 class crc_footer_checker : public vsomeip_v3::e2e::profile_interface::checker {
 public:
-    void check(const e2e_buffer& _buffer, vsomeip_v3::instance_t,
-               vsomeip_v3::e2e::profile_interface::check_status_t& _status) override {
-        _status = generic_check_status::E2E_ERROR;
-        if (_buffer.size() < 5) {
-            return;
+    check_result check(buffer_view _buffer, vsomeip_v3::instance_t) override {
+        auto status = generic_check_status::E2E_ERROR;
+        if (_buffer.size() >= 5) {
+            const uint32_t received = read_crc32_be(_buffer, _buffer.size() - 4);
+            const uint32_t calculated = vsomeip_v3::e2e_crc::calculate_profile_custom(buffer_view(_buffer, 1, _buffer.size() - 4));
+            status = (received == calculated) ? generic_check_status::E2E_OK : generic_check_status::E2E_WRONG_CRC;
         }
-        const uint32_t received = read_crc32_be(_buffer, _buffer.size() - 4);
-        const uint32_t calculated = vsomeip_v3::e2e_crc::calculate_profile_custom(buffer_view(_buffer, 1, _buffer.size() - 4));
-        _status = (received == calculated) ? generic_check_status::E2E_OK : generic_check_status::E2E_WRONG_CRC;
+        return make_check_result(status, _buffer, 1, 4);
     }
 };
 
-TEST(protect_parts_crc_footer, scatters_header_payload_and_footer) {
+TEST(protect_crc_footer, scatters_header_payload_and_footer) {
     crc_footer_protector protector;
     crc_footer_checker checker;
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect_parts(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view(app), k_instance);
 
     expect_scatter(parts, 1, app, 4);
     ASSERT_EQ((*parts.e2e_header)[0], 0);
 
     const auto wire = flatten(parts);
-    expect_check_ok(checker, wire);
+    expect_check_ok(checker, wire, 1, app, 4);
 
     ASSERT_GE(wire.size(), 5U);
     EXPECT_TRUE(std::equal(wire.begin() + 1, wire.end() - 4, app.begin()));
 }
 
-TEST(protect_parts_crc_footer, check_rejects_tampered_footer) {
+TEST(protect_crc_footer, check_rejects_tampered_footer) {
     crc_footer_protector protector;
     crc_footer_checker checker;
 
     const auto app = make_app_payload(8);
-    auto wire = flatten(protector.protect_parts(buffer_view(app), k_instance));
+    auto wire = flatten(protector.protect(buffer_view(app), k_instance));
     ASSERT_FALSE(wire.empty());
     wire.back() ^= 0xFF;
 
-    vsomeip_v3::e2e::profile_interface::check_status_t status = generic_check_status::E2E_ERROR;
-    checker.check(wire, k_instance, status);
-    EXPECT_EQ(status, generic_check_status::E2E_WRONG_CRC);
+    const auto checked = checker.check(buffer_view(wire), k_instance);
+    EXPECT_EQ(checked.status, generic_check_status::E2E_WRONG_CRC);
+    expect_check_sections(checked, wire, 1, app, 4);
 }
 
 } // namespace

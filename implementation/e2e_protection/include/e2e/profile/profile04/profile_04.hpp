@@ -24,7 +24,7 @@ struct profile_config;
 
 class profile_04 {
 public:
-    static uint32_t compute_crc(const profile_config& _config, const e2e_buffer& _buffer);
+    static uint32_t compute_crc(const profile_config& _config, const buffer_view& _buffer);
 };
 
 // [SWS_E2E_00200]
