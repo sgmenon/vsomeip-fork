@@ -18,6 +18,7 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include <vsomeip/defines.hpp>
+#include <vsomeip/payload.hpp>
 #include <vsomeip/primitive_types.hpp>
 
 #if defined(_WIN32) && !defined(_MSVC_LANG)
@@ -32,8 +33,29 @@ typedef std::vector<byte_t> message_buffer_t;
 typedef std::shared_ptr<message_buffer_t> message_buffer_ptr_t;
 
 /**
+ * One ordered piece of a send_buffer_sequence: either an owned vector or a
+ * pinned application payload (no byte copy).
+ */
+struct send_segment {
+    message_buffer_ptr_t owned;
+    std::shared_ptr<payload> pinned_payload;
+
+    std::size_t size() const {
+        if (owned) {
+            return owned->size();
+        }
+        if (pinned_payload) {
+            return pinned_payload->get_length();
+        }
+        return 0;
+    }
+
+    bool empty() const { return size() == 0; }
+};
+
+/**
  * Owning multi-buffer send unit for asio ConstBufferSequence writes.
- * Each storage entry is kept alive until the async send completion handler runs.
+ * Segment storage is kept alive until the async send completion handler runs.
  */
 struct send_buffer_sequence {
     send_buffer_sequence() = default;
@@ -54,7 +76,19 @@ struct send_buffer_sequence {
         if (!_buffer || _buffer->empty()) {
             return;
         }
-        storage_.push_back(std::move(_buffer));
+        send_segment its_segment;
+        its_segment.owned = std::move(_buffer);
+        segments_.push_back(std::move(its_segment));
+        rebuild_buffers();
+    }
+
+    void append_payload(std::shared_ptr<payload> _payload) {
+        if (!_payload || _payload->get_length() == 0) {
+            return;
+        }
+        send_segment its_segment;
+        its_segment.pinned_payload = std::move(_payload);
+        segments_.push_back(std::move(its_segment));
         rebuild_buffers();
     }
 
@@ -69,25 +103,27 @@ struct send_buffer_sequence {
         if (!_buffer || _buffer->empty()) {
             return;
         }
-        storage_.insert(storage_.begin(), std::move(_buffer));
+        send_segment its_segment;
+        its_segment.owned = std::move(_buffer);
+        segments_.insert(segments_.begin(), std::move(its_segment));
         rebuild_buffers();
     }
 
     void append_sequence(const send_buffer_sequence& _other) {
-        storage_.insert(storage_.end(), _other.storage_.begin(), _other.storage_.end());
+        segments_.insert(segments_.end(), _other.segments_.begin(), _other.segments_.end());
         rebuild_buffers();
     }
 
     std::size_t size() const {
-        return std::accumulate(storage_.begin(), storage_.end(), std::size_t{0},
-                               [](std::size_t sum, const message_buffer_ptr_t& b) { return sum + (b ? b->size() : 0); });
+        return std::accumulate(segments_.begin(), segments_.end(), std::size_t{0},
+                               [](std::size_t sum, const send_segment& s) { return sum + s.size(); });
     }
 
     bool empty() const { return size() == 0; }
 
     const std::vector<boost::asio::const_buffer>& buffers() const { return buffers_; }
 
-    const std::vector<message_buffer_ptr_t>& storage() const { return storage_; }
+    const std::vector<send_segment>& segments() const { return segments_; }
 
     /**
      * Read a big-endian uint16 from a logical offset across the sequence.
@@ -105,15 +141,22 @@ struct send_buffer_sequence {
 
     bool read_byte(std::size_t _offset, byte_t& _out) const {
         std::size_t remaining = _offset;
-        for (const auto& buf : storage_) {
-            if (!buf) {
-                continue;
+        for (const auto& its_segment : segments_) {
+            if (its_segment.owned) {
+                const auto& buf = its_segment.owned;
+                if (remaining < buf->size()) {
+                    _out = (*buf)[remaining];
+                    return true;
+                }
+                remaining -= buf->size();
+            } else if (its_segment.pinned_payload) {
+                const auto its_length = its_segment.pinned_payload->get_length();
+                if (remaining < its_length) {
+                    _out = its_segment.pinned_payload->get_data()[remaining];
+                    return true;
+                }
+                remaining -= its_length;
             }
-            if (remaining < buf->size()) {
-                _out = (*buf)[remaining];
-                return true;
-            }
-            remaining -= buf->size();
         }
         return false;
     }
@@ -124,14 +167,18 @@ struct send_buffer_sequence {
      * (e.g. SOME/IP-TP split / trace callbacks). Normal send uses buffers().
      */
     message_buffer_ptr_t flatten() const {
-        if (storage_.size() == 1 && storage_.front()) {
-            return storage_.front();
+        if (segments_.size() == 1 && segments_.front().owned) {
+            return segments_.front().owned;
         }
         auto flat = std::make_shared<message_buffer_t>();
         flat->reserve(size());
-        for (const auto& buf : storage_) {
-            if (buf) {
-                flat->insert(flat->end(), buf->begin(), buf->end());
+        for (const auto& its_segment : segments_) {
+            if (its_segment.owned) {
+                flat->insert(flat->end(), its_segment.owned->begin(), its_segment.owned->end());
+            } else if (its_segment.pinned_payload) {
+                const byte_t* its_data = its_segment.pinned_payload->get_data();
+                const auto its_length = its_segment.pinned_payload->get_length();
+                flat->insert(flat->end(), its_data, its_data + its_length);
             }
         }
         return flat;
@@ -140,15 +187,18 @@ struct send_buffer_sequence {
 private:
     void rebuild_buffers() {
         buffers_.clear();
-        buffers_.reserve(storage_.size());
-        for (const auto& buf : storage_) {
-            if (buf && !buf->empty()) {
-                buffers_.emplace_back(boost::asio::buffer(*buf));
+        buffers_.reserve(segments_.size());
+        for (const auto& its_segment : segments_) {
+            if (its_segment.owned && !its_segment.owned->empty()) {
+                buffers_.emplace_back(boost::asio::buffer(*its_segment.owned));
+            } else if (its_segment.pinned_payload && its_segment.pinned_payload->get_length() > 0) {
+                buffers_.emplace_back(
+                        boost::asio::buffer(its_segment.pinned_payload->get_data(), its_segment.pinned_payload->get_length()));
             }
         }
     }
 
-    std::vector<message_buffer_ptr_t> storage_;
+    std::vector<send_segment> segments_;
     std::vector<boost::asio::const_buffer> buffers_;
 };
 

@@ -24,7 +24,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
     }
 
     const std::size_t header_size = config_.offset_ + 3;
-    const std::size_t protected_size = header_size + _app_payload.data_length();
+    const std::size_t protected_size = header_size + _app_payload.size();
     e2e_buffer its_length_check(protected_size);
     if (!profile_05::is_buffer_length_valid(config_, its_length_check)) {
         return protect_result{};
@@ -34,7 +34,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
     auto its_header = std::make_shared<e2e_buffer>(header_size, 0);
     (*its_header)[config_.offset_ + 2] = its_counter;
 
-    uint16_t its_crc = e2e_crc::calculate_profile_05(buffer_view(*its_header, config_.offset_));
+    uint16_t its_crc = e2e_crc::calculate_profile_05(buffer_view(its_header->data(), config_.offset_));
     e2e_buffer its_after;
     its_after.push_back(its_counter);
     its_after.insert(its_after.end(), _app_payload.begin(), _app_payload.end());
@@ -51,7 +51,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
 
     protect_result its_result;
     its_result.e2e_header = std::move(its_header);
-    its_result.app_payload = std::make_shared<e2e_buffer>(_app_payload.begin(), _app_payload.end());
+    its_result.app_payload = _app_payload;
     its_result.valid = true;
     return its_result;
 }

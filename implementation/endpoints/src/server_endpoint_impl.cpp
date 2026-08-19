@@ -143,19 +143,6 @@ void server_endpoint_impl<Protocol>::set_connected(bool _connected) {
 
 template<typename Protocol>
 bool server_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& _sequence) {
-#if 0
-    std::stringstream msg;
-    msg << "sei::send ";
-    for (const auto& buf : _sequence->storage()) {
-        if (!buf) {
-            continue;
-        }
-        for (byte_t b : *buf) {
-            msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(b) << " ";
-        }
-    }
-    VSOMEIP_INFO << msg.str();
-#endif
     if (!_sequence || _sequence->empty()) {
         return false;
     }

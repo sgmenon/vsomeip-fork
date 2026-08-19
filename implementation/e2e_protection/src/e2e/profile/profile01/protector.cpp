@@ -18,7 +18,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
     std::lock_guard<std::mutex> lock(protect_mutex_);
 
     const std::size_t total = static_cast<std::size_t>(config_.data_length_ / 8) + 1U;
-    if (_app_payload.data_length() > total) {
+    if (_app_payload.size() > total) {
         return protect_result{};
     }
 
@@ -26,14 +26,16 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
     if (!profile_01::is_buffer_length_valid(config_, packed)) {
         return protect_result{};
     }
-    std::copy(_app_payload.begin(), _app_payload.end(), packed.begin() + (total - _app_payload.data_length()));
+    std::copy(_app_payload.begin(), _app_payload.end(), packed.begin() + (total - _app_payload.size()));
     write_counter(packed);
     write_data_id(packed);
     write_crc(packed, profile_01::compute_crc(config_, packed));
     increment_counter();
 
     protect_result its_result;
-    its_result.app_payload = std::make_shared<e2e_buffer>(std::move(packed));
+    its_result.owned_app_payload = std::make_shared<e2e_buffer>(std::move(packed));
+    its_result.app_payload =
+            span<const uint8_t>(its_result.owned_app_payload->data(), its_result.owned_app_payload->size());
     its_result.valid = true;
     return its_result;
 }

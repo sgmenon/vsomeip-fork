@@ -121,11 +121,11 @@ check_result e2e_provider_impl::check(e2exf::data_identifier_t id, buffer_view _
     if (const auto found_base = custom_bases_.find(id); found_base != custom_bases_.end()) {
         its_base = found_base->second;
     }
-    if (_message.data_length() < its_base) {
+    if (_message.size() < its_base) {
         return check_result{};
     }
 
-    return checker->second->check(buffer_view(_message.begin() + its_base, _message.data_length() - its_base), _instance);
+    return checker->second->check(_message.subspan(its_base), _instance);
 }
 
 template<>

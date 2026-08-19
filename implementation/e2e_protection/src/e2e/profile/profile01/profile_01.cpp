@@ -23,12 +23,9 @@ uint8_t profile_01::compute_crc(const profile_config& _config, const buffer_view
          * 1A.
          */
         // CRC = Crc_CalculateCRC8(Config->DataID, 1, 0xFF, FALSE)
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer, 1, 2),
-                                                     0xFF); // CRC over low byte of Data ID (LSB)
+        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer.data() + 1, 1), 0xFF);
 
-        // CRC = Crc_CalculateCRC8(Config->DataID >> 8,  1, CRC, FALSE)
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer, 0, 1),
-                                                     computed_crc); // CRC over high byte of Data ID (MSB)
+        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer.data(), 1), computed_crc);
 
         break;
     case p01_data_id_mode::E2E_P01_DATAID_LOW: // CRC over low byte only
@@ -37,8 +34,7 @@ uint8_t profile_01::compute_crc(const profile_config& _config, const buffer_view
          * This is applicable if the IDs in a particular system are 8 bits
          */
         // CRC = Crc_CalculateCRC8(Config->DataID, 1, 0xFF, FALSE)
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer, 1, 2),
-                                                     0xFF); // CRC over low byte of Data ID (LSB)
+        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer.data() + 1, 1), 0xFF);
         break;
 
     case p01_data_id_mode::E2E_P01_DATAID_ALT:
@@ -68,14 +64,11 @@ uint8_t profile_01::compute_crc(const profile_config& _config, const buffer_view
          * up to 12 bits. This is used in E2E variant 1C.
          */
         // CRC = Crc_CalculateCRC8(Config->DataID, 1, 0xFF, FALSE)
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer, 1, 2),
-                                                     0xFF); // CRC over low byte of Data ID (LSB)
+        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer.data() + 1, 1), 0xFF);
 
-        // CRC = Crc_CalculateCRC8 (0, 1, CRC, FALSE)
         data_id_buffer.clear();
         data_id_buffer.push_back(0x00);
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer, 0, 1),
-                                                     computed_crc); // CRC with 0x00
+        computed_crc = e2e_crc::calculate_profile_01(buffer_view(data_id_buffer.data(), 1), computed_crc);
         break;
 
     default:
@@ -85,7 +78,7 @@ uint8_t profile_01::compute_crc(const profile_config& _config, const buffer_view
     // Compute CRC over the area before the CRC (if CRC is not the first byte)
     if (_config.crc_offset_ >= 1) {
         // CRC = Crc_CalculateCRC8 (Data, (Config->CRCOffset / 8), CRC, FALSE)
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(_buffer, 0, _config.crc_offset_), computed_crc);
+        computed_crc = e2e_crc::calculate_profile_01(_buffer.subspan(0, _config.crc_offset_), computed_crc);
     }
 
     // Compute the area after CRC, if  CRC is not the last byte. Start with  the byte after CRC,
@@ -93,8 +86,7 @@ uint8_t profile_01::compute_crc(const profile_config& _config, const buffer_view
     if ((_config.crc_offset_) < (_config.data_length_ / 8) - 1) {
         // CRC = Crc_CalculateCRC8 (& Data[Config->CRCOffset/8 + 1], (Config->DataLength / 8 -
         // Config->CRCOffset / 8 - 1), CRC, FALSE)
-        computed_crc = e2e_crc::calculate_profile_01(buffer_view(_buffer, static_cast<size_t>(_config.crc_offset_ + 1), _buffer.size()),
-                                                     computed_crc);
+        computed_crc = e2e_crc::calculate_profile_01(_buffer.subspan(static_cast<size_t>(_config.crc_offset_ + 1)), computed_crc);
     }
 
     // CRC = CRC ^ 0xFF

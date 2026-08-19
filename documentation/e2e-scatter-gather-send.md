@@ -72,9 +72,9 @@ Defined in
 
 It is an owning multi-buffer send unit:
 
-- **`storage_`** — `shared_ptr`s to the real byte vectors (lifetime across
-  async completion)
-- **`buffers_`** — Asio `const_buffer` views over those vectors
+- **`segments_`** — ordered owned vectors and/or pinned `shared_ptr<payload>`
+  entries (lifetime across async completion)
+- **`buffers_`** — Asio `const_buffer` views over those segments
 
 Useful operations:
 
@@ -105,13 +105,14 @@ the protected area after the 16-byte SOME/IP header. Returned spans still
 point into the caller's receive buffer.
 
 [`protect_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
-is always scatter (owned buffers):
+returns scatter pieces for send composition:
 
-- **`e2e_header`** — optional E2E prefix (offset padding belongs here)
-- **`app_payload`** — hole-free user data. For some profiles (like AUTOSAR Profile 1)
-  that can put CRCs in the middle of app data, use this field as a contiguous block.
-- **`e2e_footer`** — optional trailer (MAC / CRC after payload). Stock
-  AUTOSAR profiles leave this empty; plugins such as SecOC use it.
+- **`e2e_header` / `e2e_footer`** — owned buffers (plugin allocates E2E meta)
+- **`app_payload`** — non-owning span into the caller's payload (routing pins
+  `shared_ptr<payload>` in `send_buffer_sequence` for async lifetime)
+- **`owned_app_payload`** — Profile 01 only; packed in-band CRC/counter/nibble
+
+See [`send-copy-elision.md`](send-copy-elision.md) for the zero-copy send path.
 
 [`check_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
 mirrors those three sections as **non-owning spans** plus `status`:
@@ -133,7 +134,7 @@ by **appending** pieces into one `send_buffer_sequence` — no concat:
 [SOME/IP header with fixed length] [e2e_header] [app_payload] [e2e_footer]
 ```
 
-Empty pieces are skipped. Each remaining vector stays in `storage_`;
+Empty pieces are skipped. Each remaining segment stays in `segments_`;
 `buffers()` is the matching `vector<const_buffer>` (an Asio
 `ConstBufferSequence`). The endpoint queues that object (the nPDU train
 `append_sequence`s passengers the same way). On the wire the socket

@@ -18,8 +18,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
 
     std::lock_guard<std::mutex> lock(protect_mutex_);
 
-    auto its_payload = std::make_shared<e2e_buffer>(_app_payload.begin(), _app_payload.end());
-    const uint32_t its_crc = e2e_crc::calculate_profile_custom(buffer_view(*its_payload));
+    const uint32_t its_crc = e2e_crc::calculate_profile_custom(_app_payload);
 
     auto its_header = std::make_shared<e2e_buffer>(static_cast<std::size_t>(config_.crc_offset_) + 4U, 0);
     (*its_header)[config_.crc_offset_] = static_cast<uint8_t>(its_crc >> 24U);
@@ -29,7 +28,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
 
     protect_result its_result;
     its_result.e2e_header = std::move(its_header);
-    its_result.app_payload = std::move(its_payload);
+    its_result.app_payload = _app_payload;
     its_result.valid = true;
     return its_result;
 }

@@ -27,6 +27,7 @@
 #include "../../endpoints/include/abstract_netlink_connector.hpp"
 #include "../../service_discovery/include/service_discovery_host.hpp"
 #include "../../endpoints/include/endpoint_manager_impl.hpp"
+#include "../../endpoints/include/buffer.hpp"
 
 namespace vsomeip_v3 {
 
@@ -79,6 +80,10 @@ public:
                      eventgroup_t _eventgroup, event_t _event);
 
     bool send(client_t _client, std::shared_ptr<message> _message, bool _force);
+
+    bool send_with_sequence(client_t _client, send_buffer_sequence_ptr_t _sequence, const std::shared_ptr<message>& _message,
+                            instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
+                            uint8_t _status_check, bool _sent_from_remote, bool _force);
 
     bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
               const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force);

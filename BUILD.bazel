@@ -87,6 +87,7 @@ VSOMEIP_LINKOPTS = select({
 
 THIRD_PARTY_DEPS = [
     "@boost.asio",
+    "@boost.core",
     "@boost.date_time",
     "@boost.filesystem",
     "@boost.functional",
@@ -707,7 +708,7 @@ cc_library(
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    deps = [":vsomeip-core"],
+    deps = [":vsomeip-core", "@boost.core"],
 )
 
 cc_shared_library(

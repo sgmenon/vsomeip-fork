@@ -142,19 +142,6 @@ bool local_uds_server_endpoint_impl::is_local() const {
 }
 
 bool local_uds_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
-#if 0
-    std::stringstream msg;
-    msg << "lse::send ";
-    for (const auto& buf : _sequence->storage()) {
-        if (!buf) {
-            continue;
-        }
-        for (byte_t b : *buf) {
-            msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(b) << " ";
-        }
-    }
-    VSOMEIP_INFO << msg.str();
-#endif
     if (!_sequence || _sequence->empty()) {
         return false;
     }
@@ -475,21 +462,6 @@ void local_uds_server_endpoint_impl::connection::send_queued(const send_buffer_s
     static const byte_t its_start_tag[] = {0x67, 0x37, 0x6D, 0x07};
     static const byte_t its_end_tag[] = {0x07, 0x6D, 0x37, 0x67};
     std::vector<boost::asio::const_buffer> bufs;
-
-#if 0
-        std::stringstream msg;
-        msg << "lse::sq: ";
-        for (const auto& buf : _sequence->storage()) {
-            if (!buf) {
-                continue;
-            }
-            for (byte_t b : *buf) {
-                msg << std::hex << std::setfill('0') << std::setw(2)
-                    << static_cast<int>(b) << " ";
-            }
-        }
-        VSOMEIP_INFO << msg.str();
-#endif
 
     bufs.push_back(boost::asio::buffer(its_start_tag));
     for (const auto& buf : _sequence->buffers()) {
