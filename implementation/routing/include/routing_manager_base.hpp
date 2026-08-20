@@ -160,13 +160,13 @@ protected:
 
     void remove_eventgroup_info(service_t _service, instance_t _instance, eventgroup_t _eventgroup);
 
-    bool send_local_notification(client_t _client, const send_buffer_sequence_ptr_t& _sequence, instance_t _instance, bool _reliable,
+    bool send_local_notification(client_t _client, const buffer_sequence_ptr_t& _sequence, instance_t _instance, bool _reliable,
                                  uint8_t _status_check, bool _force, send_completion_state_ptr_t _completion = nullptr);
 
     bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance,
                     bool _reliable, protocol::id_e _command, uint8_t _status_check) const;
 
-    bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const send_buffer_sequence_ptr_t& _someip, instance_t _instance,
+    bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const buffer_sequence_ptr_t& _someip, instance_t _instance,
                     bool _reliable, protocol::id_e _command, uint8_t _status_check,
                     send_completion_state_ptr_t _completion = nullptr) const;
 

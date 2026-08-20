@@ -53,12 +53,17 @@ inline void ensure_exclusive_message_payload(const std::shared_ptr<message>& _me
     }
 }
 
-/** Routing always pins; call only after ensure_exclusive_message_payload / notify snapshot. */
-inline void append_message_payload(send_buffer_sequence& _sequence, const std::shared_ptr<payload>& _payload) {
+/** Routing pins payload bytes via the backing vector (same model as recv pins). */
+inline void append_message_payload(buffer_sequence& _sequence, const std::shared_ptr<payload>& _payload) {
     if (!_payload || _payload->get_length() == 0) {
         return;
     }
-    _sequence.append_payload(_payload);
+    auto its_impl = std::dynamic_pointer_cast<payload_impl>(_payload);
+    if (its_impl && its_impl->get_buffer()) {
+        _sequence.append_buffer_slice(its_impl->get_buffer(), its_impl->get_buffer_offset(), its_impl->get_length());
+        return;
+    }
+    _sequence.append_bytes(_payload->get_data(), _payload->get_length());
 }
 
 } // namespace vsomeip_v3

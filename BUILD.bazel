@@ -702,7 +702,7 @@ VSOMEIP_E2E_SRCS = [
 ]
 
 cc_library(
-    name = "vsomeip-e2e",
+    name = "vsomeip-e2e-lib",
     srcs = VSOMEIP_E2E_SRCS,
     hdrs = VSOMEIP_INTERNAL_HDRS,
     copts = VSOMEIP_COPTS,
@@ -728,4 +728,14 @@ genrule(
     outs = ["libvsomeip3-e2e.so.3"],
     cmd = "cp $(location :vsomeip3-e2e-unversioned) $@",
     visibility = ["//visibility:public"],
+)
+
+cc_import(
+    name = "vsomeip-e2e",
+    shared_library = ":vsomeip3-e2e",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip-internal-hdrs",
+    ],
 )

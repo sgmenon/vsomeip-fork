@@ -131,7 +131,7 @@ void local_tcp_server_endpoint_impl::stop(bool /*_due_to_error*/) {
     }
 }
 
-bool local_tcp_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
+bool local_tcp_server_endpoint_impl::send(const buffer_sequence_ptr_t& _sequence) {
     if (!_sequence || _sequence->empty()) {
         return false;
     }
@@ -166,7 +166,7 @@ bool local_tcp_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _seq
     return true;
 }
 
-bool local_tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool local_tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) {
 
     (void)_target;
     (void)_sequence;
@@ -456,7 +456,7 @@ void local_tcp_server_endpoint_impl::connection::stop() {
     }
 }
 
-void local_tcp_server_endpoint_impl::connection::send_queued(const send_buffer_sequence_ptr_t& _sequence) {
+void local_tcp_server_endpoint_impl::connection::send_queued(const buffer_sequence_ptr_t& _sequence) {
 
     std::shared_ptr<local_tcp_server_endpoint_impl> its_server(server_.lock());
     if (!its_server) {
@@ -519,7 +519,7 @@ void local_tcp_server_endpoint_impl::get_configured_times_from_endpoint(service_
     VSOMEIP_ERROR << "ltsei::get_configured_times_from_endpoint." << " endpoint > " << this;
 }
 
-void local_tcp_server_endpoint_impl::connection::send_cbk(const send_buffer_sequence_ptr_t _sequence, boost::system::error_code const& _error,
+void local_tcp_server_endpoint_impl::connection::send_cbk(const buffer_sequence_ptr_t _sequence, boost::system::error_code const& _error,
                                                           std::size_t _bytes) {
     (void)_bytes;
     if (_sequence) {
@@ -987,7 +987,7 @@ std::uint16_t local_tcp_server_endpoint_impl::get_local_port() const {
     return local_.port();
 }
 
-bool local_tcp_server_endpoint_impl::check_packetizer_space(send_buffer_sequence_ptr_t* _packetizer, std::uint32_t _size) const {
+bool local_tcp_server_endpoint_impl::check_packetizer_space(buffer_sequence_ptr_t* _packetizer, std::uint32_t _size) const {
     if ((*_packetizer)->size() + _size < (*_packetizer)->size()) {
         VSOMEIP_ERROR << "Overflow in packetizer addition ~> abort sending!";
         return false;
@@ -995,12 +995,12 @@ bool local_tcp_server_endpoint_impl::check_packetizer_space(send_buffer_sequence
     return true;
 }
 
-bool local_tcp_server_endpoint_impl::queue_train_buffer(target_data_iterator_type _it, send_buffer_sequence_ptr_t* _packetizer,
+bool local_tcp_server_endpoint_impl::queue_train_buffer(target_data_iterator_type _it, buffer_sequence_ptr_t* _packetizer,
                                                         std::uint32_t _size) const {
     if ((*_packetizer)->size() + _size > max_message_size_ && !(*_packetizer)->empty()) {
         _it->second.queue_.push_back(std::make_pair(*_packetizer, 0));
         _it->second.queue_size_ += (*_packetizer)->size();
-        *_packetizer = std::make_shared<send_buffer_sequence>();
+        *_packetizer = std::make_shared<buffer_sequence>();
     }
     return true;
 }

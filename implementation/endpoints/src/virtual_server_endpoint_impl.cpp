@@ -46,12 +46,12 @@ void virtual_server_endpoint_impl::set_connected(bool _connected) {
     (void)_connected;
 }
 
-bool virtual_server_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
+bool virtual_server_endpoint_impl::send(const buffer_sequence_ptr_t& _sequence) {
     (void)_sequence;
     return false;
 }
 
-bool virtual_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool virtual_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) {
     (void)_target;
     (void)_sequence;
     return false;

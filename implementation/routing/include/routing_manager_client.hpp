@@ -176,7 +176,7 @@ private:
 
     void on_suspend();
 
-    bool send_with_someip_sequence(client_t _client, const send_buffer_sequence_ptr_t& _sequence, const byte_t* _hdr, length_t _hdr_size,
+    bool send_with_someip_sequence(client_t _client, const buffer_sequence_ptr_t& _sequence, const byte_t* _hdr, length_t _hdr_size,
                                    instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
                                    uint8_t _status_check, bool _sent_from_remote, bool _force,
                                    send_completion_state_ptr_t _completion = nullptr);

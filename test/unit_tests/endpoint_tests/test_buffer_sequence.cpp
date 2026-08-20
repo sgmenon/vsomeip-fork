@@ -24,50 +24,50 @@ static_assert(std::is_same<vsomeip_v3::span<const std::uint8_t>, boost::span<con
 
 namespace {
 
-TEST(send_buffer_sequence_test, flatten_single_buffer_reuses_storage) {
+TEST(buffer_sequence_test, flatten_single_buffer_reuses_storage) {
     auto payload = std::make_shared<vsomeip_v3::message_buffer_t>();
     payload->push_back(0x11);
     payload->push_back(0x22);
+    const auto* raw = payload.get();
 
-    vsomeip_v3::send_buffer_sequence sequence(payload);
+    vsomeip_v3::buffer_sequence sequence(std::move(payload));
     auto flat = sequence.flatten();
 
-    EXPECT_EQ(flat.get(), payload.get());
+    EXPECT_EQ(flat.get(), raw);
     ASSERT_EQ(flat->size(), 2U);
     EXPECT_EQ((*flat)[0], 0x11);
     EXPECT_EQ((*flat)[1], 0x22);
 }
 
-TEST(send_buffer_sequence_test, flatten_multi_buffer_concatenates) {
+TEST(buffer_sequence_test, flatten_multi_buffer_concatenates) {
     auto a = std::make_shared<vsomeip_v3::message_buffer_t>();
     a->push_back(0xAA);
     a->push_back(0xBB);
     auto b = std::make_shared<vsomeip_v3::message_buffer_t>();
     b->push_back(0xCC);
 
-    vsomeip_v3::send_buffer_sequence sequence;
-    sequence.append(a);
-    sequence.append(b);
+    vsomeip_v3::buffer_sequence sequence;
+    sequence.append(std::move(a));
+    sequence.append(std::move(b));
 
     auto flat = sequence.flatten();
     ASSERT_NE(flat, nullptr);
-    EXPECT_NE(flat.get(), a.get());
     ASSERT_EQ(flat->size(), 3U);
     EXPECT_EQ((*flat)[0], 0xAA);
     EXPECT_EQ((*flat)[1], 0xBB);
     EXPECT_EQ((*flat)[2], 0xCC);
 }
 
-TEST(send_buffer_sequence_test, read_uint16_be_handles_cross_buffer) {
+TEST(buffer_sequence_test, read_uint16_be_handles_cross_buffer) {
     auto a = std::make_shared<vsomeip_v3::message_buffer_t>();
     a->push_back(0x12);
     auto b = std::make_shared<vsomeip_v3::message_buffer_t>();
     b->push_back(0x34);
     b->push_back(0x56);
 
-    vsomeip_v3::send_buffer_sequence sequence;
-    sequence.append(a);
-    sequence.append(b);
+    vsomeip_v3::buffer_sequence sequence;
+    sequence.append(std::move(a));
+    sequence.append(std::move(b));
 
     std::uint16_t value = 0;
     ASSERT_TRUE(sequence.read_uint16_be(0U, value));
@@ -77,13 +77,13 @@ TEST(send_buffer_sequence_test, read_uint16_be_handles_cross_buffer) {
     EXPECT_EQ(value, 0x3456);
 }
 
-TEST(send_buffer_sequence_test, append_buffer_slice_shares_backing_store) {
+TEST(buffer_sequence_test, append_buffer_slice_shares_backing_store) {
     auto buf = std::make_shared<vsomeip_v3::message_buffer_t>();
     for (std::uint8_t i = 0; i < 8; ++i) {
         buf->push_back(i);
     }
 
-    vsomeip_v3::send_buffer_sequence sequence;
+    vsomeip_v3::buffer_sequence sequence;
     sequence.append_buffer_slice(buf, 0, 2);
     sequence.append_buffer_slice(buf, 2, 6);
 
@@ -104,7 +104,7 @@ TEST(send_buffer_sequence_test, append_buffer_slice_shares_backing_store) {
     EXPECT_EQ(value, 0x0001);
 }
 
-TEST(send_buffer_sequence_test, completion_fires_once_after_pending) {
+TEST(buffer_sequence_test, completion_fires_once_after_pending) {
     int calls = 0;
     bool last_ok = false;
     auto latch = std::make_shared<vsomeip_v3::send_completion_state>([&](bool ok) {
@@ -115,8 +115,8 @@ TEST(send_buffer_sequence_test, completion_fires_once_after_pending) {
     latch->begin();
     latch->add_pending(2);
 
-    vsomeip_v3::send_buffer_sequence a;
-    vsomeip_v3::send_buffer_sequence b;
+    vsomeip_v3::buffer_sequence a;
+    vsomeip_v3::buffer_sequence b;
     a.attach_completion(latch);
     b.attach_completion(latch);
 
@@ -128,16 +128,16 @@ TEST(send_buffer_sequence_test, completion_fires_once_after_pending) {
     EXPECT_TRUE(last_ok);
 }
 
-TEST(send_buffer_sequence_test, append_sequence_merges_completions) {
+TEST(buffer_sequence_test, append_sequence_merges_completions) {
     int calls = 0;
     auto latch = std::make_shared<vsomeip_v3::send_completion_state>([&](bool) { ++calls; });
     latch->begin();
     latch->add_pending(1);
 
-    vsomeip_v3::send_buffer_sequence passenger;
+    vsomeip_v3::buffer_sequence passenger;
     passenger.attach_completion(latch);
 
-    vsomeip_v3::send_buffer_sequence train;
+    vsomeip_v3::buffer_sequence train;
     train.append_sequence(passenger);
     train.complete(true);
     latch->end();
@@ -145,7 +145,7 @@ TEST(send_buffer_sequence_test, append_sequence_merges_completions) {
     EXPECT_EQ(calls, 1);
 }
 
-TEST(send_buffer_sequence_test, snapshot_payload_if_shared_copies_when_shared) {
+TEST(buffer_sequence_test, snapshot_payload_if_shared_copies_when_shared) {
     auto original = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{1, 2, 3});
     auto kept = original;
     auto result = vsomeip_v3::snapshot_payload_if_shared(original);
@@ -157,14 +157,14 @@ TEST(send_buffer_sequence_test, snapshot_payload_if_shared_copies_when_shared) {
     EXPECT_EQ(result->get_data()[0], 1);
 }
 
-TEST(send_buffer_sequence_test, snapshot_payload_if_shared_pins_when_exclusive) {
+TEST(buffer_sequence_test, snapshot_payload_if_shared_pins_when_exclusive) {
     auto exclusive = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{4, 5});
     auto* raw = exclusive.get();
     auto result = vsomeip_v3::snapshot_payload_if_shared(std::move(exclusive));
     EXPECT_EQ(result.get(), raw);
 }
 
-TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_message_shared) {
+TEST(buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_message_shared) {
     std::shared_ptr<vsomeip_v3::message> message = std::make_shared<vsomeip_v3::message_impl>();
     auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{1, 2, 3});
     message->set_payload(payload);
@@ -180,7 +180,7 @@ TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_
     (void)kept_message;
 }
 
-TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_pins_when_exclusive) {
+TEST(buffer_sequence_test, ensure_exclusive_message_payload_pins_when_exclusive) {
     std::shared_ptr<vsomeip_v3::message> message = std::make_shared<vsomeip_v3::message_impl>();
     auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{7, 8});
     message->set_payload(std::move(payload));
@@ -191,7 +191,7 @@ TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_pins_when_exclu
     EXPECT_EQ(message->get_payload().get(), raw);
 }
 
-TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_payload_kept) {
+TEST(buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_payload_kept) {
     std::shared_ptr<vsomeip_v3::message> message = std::make_shared<vsomeip_v3::message_impl>();
     auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{3, 4, 5});
     message->set_payload(payload);

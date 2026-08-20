@@ -137,9 +137,9 @@ void client_endpoint_impl<Protocol>::stop(bool _due_to_error) {
 }
 
 template<typename Protocol>
-std::pair<send_buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::get_front() {
+std::pair<buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::get_front() {
 
-    std::pair<send_buffer_sequence_ptr_t, uint32_t> its_entry;
+    std::pair<buffer_sequence_ptr_t, uint32_t> its_entry;
     if (queue_.size())
         its_entry = queue_.front();
 
@@ -147,7 +147,7 @@ std::pair<send_buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) {
 
     (void)_target;
     (void)_sequence;
@@ -168,7 +168,7 @@ bool client_endpoint_impl<Protocol>::send_error(const std::shared_ptr<endpoint_d
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& _sequence) {
+bool client_endpoint_impl<Protocol>::send(const buffer_sequence_ptr_t& _sequence) {
 
     if (!_sequence || _sequence->empty()) {
         return false;
@@ -309,7 +309,7 @@ void client_endpoint_impl<Protocol>::send_segments(const tp::tp_split_messages_t
     }
 
     for (const auto& s : _segments) {
-        queue_.emplace_back(std::make_pair(std::make_shared<send_buffer_sequence>(s), _separation_time));
+        queue_.emplace_back(std::make_pair(std::make_shared<buffer_sequence>(s), _separation_time));
         queue_size_ += s->size();
     }
 
@@ -525,7 +525,7 @@ void fail_queue_completions(Queue& _queue) {
 
 template<typename Protocol>
 void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                              const send_buffer_sequence_ptr_t& _sent_msg) {
+                                              const buffer_sequence_ptr_t& _sent_msg) {
 
     (void)_bytes;
 
@@ -844,7 +844,7 @@ typename endpoint_impl<Protocol>::cms_ret_e client_endpoint_impl<Protocol>::segm
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::check_queue_limit(const send_buffer_sequence_ptr_t& _sequence, std::uint32_t _size) const {
+bool client_endpoint_impl<Protocol>::check_queue_limit(const buffer_sequence_ptr_t& _sequence, std::uint32_t _size) const {
 
     if (endpoint_impl<Protocol>::queue_limit_ != QUEUE_SIZE_UNLIMITED
         && (queue_size_ + _size > endpoint_impl<Protocol>::queue_limit_ || queue_size_ + _size < _size)) { // overflow protection

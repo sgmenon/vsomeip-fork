@@ -6,6 +6,9 @@
 #ifndef VSOMEIP_V3_PAYLOAD_IMPL_HPP
 #define VSOMEIP_V3_PAYLOAD_IMPL_HPP
 
+#include <memory>
+#include <vector>
+
 #include <vsomeip/export.hpp>
 #include <vsomeip/payload.hpp>
 
@@ -18,12 +21,17 @@ namespace vsomeip_v3 {
 class serializer;
 class deserializer;
 
+// Always a view: bytes live in an external shared_ptr<vector>. create_payload /
+// set_data allocate that vector; receive paths pin a slice of a recv/IPC buffer.
 class payload_impl : public payload {
 public:
     VSOMEIP_EXPORT payload_impl();
     VSOMEIP_EXPORT payload_impl(const byte_t* _data, uint32_t _size);
     VSOMEIP_EXPORT payload_impl(const std::vector<byte_t>& _data);
     VSOMEIP_EXPORT payload_impl(const payload_impl& _payload);
+    // View a slice of an owned buffer (no byte copy). Lifetime is tied to
+    // `_buffer` until set_data / deserialize replaces the backing store.
+    VSOMEIP_EXPORT payload_impl(std::shared_ptr<std::vector<byte_t>> _buffer, std::size_t _offset, std::size_t _length);
     VSOMEIP_EXPORT virtual ~payload_impl() = default;
 
     VSOMEIP_EXPORT bool operator==(const payload& _other) const;
@@ -31,6 +39,10 @@ public:
     VSOMEIP_EXPORT byte_t* get_data();
     VSOMEIP_EXPORT const byte_t* get_data() const;
     VSOMEIP_EXPORT length_t get_length() const;
+
+    // Backing store for buffer_sequence pinning (shared ownership).
+    VSOMEIP_EXPORT const std::shared_ptr<std::vector<byte_t>>& get_buffer() const { return buffer_; }
+    VSOMEIP_EXPORT std::size_t get_buffer_offset() const { return offset_; }
 
     VSOMEIP_EXPORT void set_capacity(length_t _capacity);
 
@@ -42,7 +54,11 @@ public:
     VSOMEIP_EXPORT bool deserialize(deserializer* _from);
 
 private:
-    std::vector<byte_t> data_;
+    void reset_owned(std::shared_ptr<std::vector<byte_t>> _buffer);
+
+    std::shared_ptr<std::vector<byte_t>> buffer_;
+    std::size_t offset_{0};
+    std::size_t length_{0};
 };
 
 } // namespace vsomeip_v3

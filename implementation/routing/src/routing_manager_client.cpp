@@ -780,7 +780,7 @@ bool routing_manager_client::send(client_t _client, std::shared_ptr<message> _me
     (*its_header)[VSOMEIP_MESSAGE_TYPE_POS] = static_cast<byte_t>(_message->get_message_type());
     (*its_header)[VSOMEIP_RETURN_CODE_POS] = static_cast<byte_t>(_message->get_return_code());
 
-    auto its_sequence = std::make_shared<send_buffer_sequence>();
+    auto its_sequence = std::make_shared<buffer_sequence>();
     its_sequence->append(std::move(its_header));
     append_message_payload(*its_sequence, its_payload);
 
@@ -812,7 +812,7 @@ bool routing_manager_client::send(client_t _client, const byte_t* _data, length_
     }
 
     auto its_someip = std::make_shared<message_buffer_t>(_data, _data + _size);
-    auto its_sequence = std::make_shared<send_buffer_sequence>();
+    auto its_sequence = std::make_shared<buffer_sequence>();
     if (_size > VSOMEIP_FULL_HEADER_SIZE) {
         its_sequence->append_buffer_slice(its_someip, 0, VSOMEIP_FULL_HEADER_SIZE);
         its_sequence->append_buffer_slice(its_someip, VSOMEIP_FULL_HEADER_SIZE, _size - VSOMEIP_FULL_HEADER_SIZE);
@@ -823,7 +823,7 @@ bool routing_manager_client::send(client_t _client, const byte_t* _data, length_
                                      _sent_from_remote, _force, nullptr);
 }
 
-bool routing_manager_client::send_with_someip_sequence(client_t _client, const send_buffer_sequence_ptr_t& _sequence, const byte_t* _hdr,
+bool routing_manager_client::send_with_someip_sequence(client_t _client, const buffer_sequence_ptr_t& _sequence, const byte_t* _hdr,
                                                       length_t _hdr_size, instance_t _instance, bool _reliable, client_t _bound_client,
                                                       const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote,
                                                       bool _force, send_completion_state_ptr_t _completion) {

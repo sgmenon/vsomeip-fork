@@ -105,23 +105,31 @@ TEST(payload_impl_test, serialize) {
     ASSERT_EQ(its_payload_impl->get_data()[3], its_serializer.get_data()[3]);
 }
 
-TEST(payload_impl_test, deserialize) {
-    // Create test data.
-    std::array<std::uint8_t, array_size> data_array_{byte1, byte2, byte3, byte4};
+TEST(payload_impl_test, pin_slice) {
+    auto its_buffer = std::make_shared<std::vector<vsomeip_v3::byte_t>>(std::vector<vsomeip_v3::byte_t>{0xAA, byte1, byte2, byte3, byte4, 0xBB});
+    const std::size_t its_offset = 1;
+    const std::size_t its_length = 4;
 
-    std::unique_ptr<vsomeip_v3::payload_impl> its_payload_impl(new vsomeip_v3::payload_impl());
-    vsomeip_v3::deserializer its_deserializer(data_array_.data(), data_array_.size(), buffer_shrink_threshold);
+    vsomeip_v3::payload_impl its_pinned(its_buffer, its_offset, its_length);
 
-    // Test set_capacity at the same time.
-    its_payload_impl->set_capacity(array_size);
+    ASSERT_EQ(its_pinned.get_length(), its_length);
+    ASSERT_EQ(its_pinned.get_data(), its_buffer->data() + its_offset);
+    ASSERT_EQ(its_pinned.get_data()[0], byte1);
+    ASSERT_EQ(its_pinned.get_data()[3], byte4);
 
-    // Test Method.
-    ASSERT_TRUE(its_payload_impl->deserialize(&its_deserializer));
+    // Copy constructor materializes independent storage.
+    vsomeip_v3::payload_impl its_copy(its_pinned);
+    ASSERT_TRUE(its_pinned.operator==(its_copy));
+    ASSERT_NE(its_copy.get_data(), its_pinned.get_data());
 
-    // Checks.
-    ASSERT_EQ(its_payload_impl->get_length(), array_size);
-    ASSERT_EQ(its_payload_impl->get_data()[0], data_array_[0]);
-    ASSERT_EQ(its_payload_impl->get_data()[1], data_array_[1]);
-    ASSERT_EQ(its_payload_impl->get_data()[2], data_array_[2]);
-    ASSERT_EQ(its_payload_impl->get_data()[3], data_array_[3]);
+    vsomeip_v3::serializer its_serializer(buffer_shrink_threshold);
+    ASSERT_TRUE(its_pinned.serialize(&its_serializer));
+    ASSERT_EQ(its_serializer.get_data()[0], byte1);
+    ASSERT_EQ(its_serializer.get_data()[3], byte4);
+
+    // set_data replaces the backing store with a fresh owned buffer.
+    its_pinned.set_data(std::vector<vsomeip_v3::byte_t>{byte4, byte3});
+    ASSERT_EQ(its_pinned.get_length(), 2u);
+    ASSERT_EQ(its_pinned.get_data()[0], byte4);
+    ASSERT_NE(its_pinned.get_data(), its_buffer->data() + its_offset);
 }

@@ -34,6 +34,7 @@ namespace vsomeip_v3 {
 class configuration;
 class deserializer;
 class eventgroupinfo;
+class message_impl;
 class routing_manager_host;
 class routing_manager_stub;
 class serializer;
@@ -45,6 +46,7 @@ class service_discovery;
 
 namespace e2e {
 class e2e_provider;
+struct check_result;
 } // namespace e2e
 
 class routing_manager_impl : public routing_manager_base, public routing_manager_stub_host, public sd::service_discovery_host {
@@ -239,11 +241,24 @@ private:
     void stop_offer_service(client_t _client, service_t _service, instance_t _instance, major_version_t _major, minor_version_t _minor,
                             bool _must_queue);
 
+#ifndef ANDROID
+    bool on_message_checked(service_t _service, instance_t _instance, const byte_t* _data, length_t _size, bool _reliable,
+                            client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _check_status, bool _is_from_remote,
+                            message_buffer_ptr_t _pin, const e2e::check_result* _e2e_checked);
+#endif
     bool deliver_message(const byte_t* _data, length_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
-                         const vsomeip_sec_client_t* _sec_client, uint8_t _status_check = 0, bool _is_from_remote = false);
+                         const vsomeip_sec_client_t* _sec_client, uint8_t _status_check = 0, bool _is_from_remote = false,
+                         message_buffer_ptr_t _pin = nullptr);
+    bool deliver_message(std::shared_ptr<message_impl> _message, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
+                         bool _is_from_remote);
     bool deliver_notification(service_t _service, instance_t _instance, const byte_t* _data, length_t _length, bool _reliable,
                               client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _status_check = 0,
-                              bool _is_from_remote = false);
+                              bool _is_from_remote = false, message_buffer_ptr_t _pin = nullptr
+#ifndef ANDROID
+                              ,
+                              const e2e::check_result* _e2e_checked = nullptr
+#endif
+    );
 
     bool is_suppress_event(service_t _service, instance_t _instance, event_t _event) const;
 
@@ -343,7 +358,7 @@ private:
 
     void clear_local_services();
 
-    bool send_with_sequence(client_t _client, send_buffer_sequence_ptr_t _sequence, const std::shared_ptr<message>& _message,
+    bool send_with_sequence(client_t _client, buffer_sequence_ptr_t _sequence, const std::shared_ptr<message>& _message,
                             instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
                             uint8_t _status_check, bool _sent_from_remote, bool _force,
                             send_completion_state_ptr_t _completion = nullptr);

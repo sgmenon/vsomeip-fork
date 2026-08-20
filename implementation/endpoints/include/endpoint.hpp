@@ -43,13 +43,13 @@ public:
     virtual bool is_established_or_connected() const = 0;
 
     // Preferred send path: scatter-gather / multi-buffer sequence.
-    virtual bool send(const send_buffer_sequence_ptr_t& _sequence) = 0;
-    virtual bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) = 0;
+    virtual bool send(const buffer_sequence_ptr_t& _sequence) = 0;
+    virtual bool send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) = 0;
 
     // Thin convenience wrappers for contiguous callers (SD host, legacy paths).
-    bool send(const byte_t* _data, uint32_t _size) { return send(std::make_shared<send_buffer_sequence>(_data, _size)); }
+    bool send(const byte_t* _data, uint32_t _size) { return send(std::make_shared<buffer_sequence>(_data, _size)); }
     bool send_to(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) {
-        return send_to(_target, std::make_shared<send_buffer_sequence>(_data, _size));
+        return send_to(_target, std::make_shared<buffer_sequence>(_data, _size));
     }
 
     virtual bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size) = 0;

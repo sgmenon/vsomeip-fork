@@ -1179,7 +1179,7 @@ void routing_manager_base::remove_eventgroup_info(service_t _service, instance_t
     }
 }
 
-bool routing_manager_base::send_local_notification(client_t _client, const send_buffer_sequence_ptr_t& _sequence, instance_t _instance,
+bool routing_manager_base::send_local_notification(client_t _client, const buffer_sequence_ptr_t& _sequence, instance_t _instance,
                                                    bool _reliable, uint8_t _status_check, bool _force,
                                                    send_completion_state_ptr_t _completion) {
     bool has_local(false);
@@ -1234,7 +1234,7 @@ bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client
 
     // One owned buffer for the SOME/IP frame; scatter IPC meta + header slice + payload slice.
     auto its_someip = std::make_shared<message_buffer_t>(_data, _data + _size);
-    auto its_sequence = std::make_shared<send_buffer_sequence>();
+    auto its_sequence = std::make_shared<buffer_sequence>();
     if (_size > VSOMEIP_FULL_HEADER_SIZE) {
         its_sequence->append_buffer_slice(its_someip, 0, VSOMEIP_FULL_HEADER_SIZE);
         its_sequence->append_buffer_slice(its_someip, VSOMEIP_FULL_HEADER_SIZE, _size - VSOMEIP_FULL_HEADER_SIZE);
@@ -1244,7 +1244,7 @@ bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client
     return send_local(_target, _client, its_sequence, _instance, _reliable, _command, _status_check, nullptr);
 }
 
-bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const send_buffer_sequence_ptr_t& _someip,
+bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const buffer_sequence_ptr_t& _someip,
                                       instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check,
                                       send_completion_state_ptr_t _completion) const {
 
@@ -1277,7 +1277,7 @@ bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client
     its_offset += sizeof(uint8_t);
     std::memcpy(its_meta->data() + its_offset, &_client, sizeof(_client));
 
-    auto its_ipc = std::make_shared<send_buffer_sequence>();
+    auto its_ipc = std::make_shared<buffer_sequence>();
     its_ipc->append(std::move(its_meta));
     its_ipc->append_sequence(*_someip);
     its_ipc->clear_completions();

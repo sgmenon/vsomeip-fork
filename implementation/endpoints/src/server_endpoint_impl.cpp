@@ -142,7 +142,7 @@ void server_endpoint_impl<Protocol>::set_connected(bool _connected) {
 }
 
 template<typename Protocol>
-bool server_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& _sequence) {
+bool server_endpoint_impl<Protocol>::send(const buffer_sequence_ptr_t& _sequence) {
     if (!_sequence || _sequence->empty()) {
         return false;
     }
@@ -200,7 +200,7 @@ bool server_endpoint_impl<Protocol>::send(const std::vector<byte_t>& _cmd_header
 }
 
 template<typename Protocol>
-bool server_endpoint_impl<Protocol>::send_intern(endpoint_type _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool server_endpoint_impl<Protocol>::send_intern(endpoint_type _target, const buffer_sequence_ptr_t& _sequence) {
 
     if (!_sequence || _sequence->empty()) {
         return false;
@@ -374,7 +374,7 @@ void server_endpoint_impl<Protocol>::send_segments(const tp::tp_split_messages_t
     }
 
     for (const auto& s : _segments) {
-        its_data.queue_.emplace_back(std::make_shared<send_buffer_sequence>(s), _separation_time);
+        its_data.queue_.emplace_back(std::make_shared<buffer_sequence>(s), _separation_time);
         its_data.queue_size_ += s->size();
     }
 
@@ -451,7 +451,7 @@ void server_endpoint_impl<Protocol>::recalculate_queue_size(endpoint_data_type& 
 }
 
 template<typename Protocol>
-bool server_endpoint_impl<Protocol>::check_queue_limit(const send_buffer_sequence_ptr_t& _sequence, std::uint32_t _size,
+bool server_endpoint_impl<Protocol>::check_queue_limit(const buffer_sequence_ptr_t& _sequence, std::uint32_t _size,
                                                        endpoint_data_type& _endpoint_data) const {
 
     // No queue limit --> Fine
@@ -492,7 +492,7 @@ bool server_endpoint_impl<Protocol>::check_queue_limit(const send_buffer_sequenc
 template<typename Protocol>
 bool server_endpoint_impl<Protocol>::check_queue_limit(const uint8_t* _data, std::uint32_t _size,
                                                        endpoint_data_type& _endpoint_data) const {
-    return check_queue_limit(std::make_shared<send_buffer_sequence>(_data, _size), _size, _endpoint_data);
+    return check_queue_limit(std::make_shared<buffer_sequence>(_data, _size), _size, _endpoint_data);
 }
 
 template<typename Protocol>
@@ -640,7 +640,7 @@ void server_endpoint_impl<Protocol>::send_cbk(const endpoint_type _key, boost::s
     //
     // TODO(brunoldsilva): Code like this is used in a lot of places. It might be worth moving this
     // into a proper function.
-    auto parse_message_ids = [](const send_buffer_sequence_ptr_t& _sequence, service_t& its_service, method_t& its_method,
+    auto parse_message_ids = [](const buffer_sequence_ptr_t& _sequence, service_t& its_service, method_t& its_method,
                                 client_t& its_client, session_t& its_session) {
         if (_sequence && _sequence->size() > VSOMEIP_SESSION_POS_MAX) {
             _sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service);
@@ -650,13 +650,13 @@ void server_endpoint_impl<Protocol>::send_cbk(const endpoint_type _key, boost::s
         }
     };
 
-    send_buffer_sequence_ptr_t its_sequence;
+    buffer_sequence_ptr_t its_sequence;
     if (its_data.queue_.size()) {
         its_sequence = its_data.queue_.front().first;
     }
 
     if (!its_sequence) {
-        its_sequence = std::make_shared<send_buffer_sequence>();
+        its_sequence = std::make_shared<buffer_sequence>();
         VSOMEIP_WARNING << __func__ << ": prevented nullptr de-reference by initializing queue sequence";
     }
 

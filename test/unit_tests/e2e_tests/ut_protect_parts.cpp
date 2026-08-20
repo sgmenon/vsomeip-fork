@@ -25,6 +25,7 @@
 #include "../../../implementation/e2e_protection/include/e2e/profile/profile_custom/protector.hpp"
 #include "../../../implementation/message/include/payload_impl.hpp"
 #include "../../../implementation/endpoints/include/buffer.hpp"
+#include "../../../implementation/routing/include/payload_ownership.hpp"
 
 namespace {
 
@@ -326,16 +327,18 @@ TEST(protect_crc_footer, check_rejects_tampered_footer) {
     expect_check_sections(checked, wire, 1, app, 4);
 }
 
-TEST(send_buffer_sequence_test, append_payload_pins_without_copy) {
-    vsomeip_v3::send_buffer_sequence seq;
+TEST(buffer_sequence_test, append_payload_pins_without_copy) {
+    vsomeip_v3::buffer_sequence seq;
     auto owned = std::make_shared<vsomeip_v3::message_buffer_t>(std::vector<vsomeip_v3::byte_t>{1, 2, 3});
-    seq.append(owned);
+    seq.append(std::move(owned));
 
     auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{0x10, 0x11, 0x12});
-    seq.append_payload(payload);
+    const auto* payload_bytes = payload->get_data();
+    vsomeip_v3::append_message_payload(seq, payload);
 
     EXPECT_EQ(seq.size(), 6U);
     EXPECT_EQ(seq.segments().size(), 2U);
+    EXPECT_EQ(seq.segments()[1].data(), payload_bytes);
     EXPECT_EQ(seq.flatten()->size(), 6U);
 }
 

@@ -30,8 +30,8 @@ public:
     void set_established(bool _established);
     void set_connected(bool _connected);
 
-    bool send(const send_buffer_sequence_ptr_t& _sequence) override;
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) override;
+    bool send(const buffer_sequence_ptr_t& _sequence) override;
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     void receive();
 

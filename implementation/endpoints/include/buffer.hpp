@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -77,58 +78,52 @@ private:
 typedef std::shared_ptr<send_completion_state> send_completion_state_ptr_t;
 
 /**
- * One ordered piece of a send_buffer_sequence: owned vector (full or slice),
- * or pinned application payload (no byte copy).
+ * One ordered piece of a buffer_sequence: shared_ptr to a byte vector plus an
+ * optional slice. Same ownership model for headers, meta, and payload bytes.
  */
-struct send_segment {
-    message_buffer_ptr_t owned;
-    std::shared_ptr<payload> pinned_payload;
+struct buffer_segment {
+    message_buffer_ptr_t buffer;
     std::size_t slice_offset{0};
-    std::size_t slice_length{0}; // 0 => entire owned buffer / payload
+    std::size_t slice_length{0}; // 0 => entire buffer
 
     std::size_t size() const {
-        if (owned) {
-            if (slice_length > 0) {
-                return slice_length;
-            }
-            return owned->size();
+        if (!buffer) {
+            return 0;
         }
-        if (pinned_payload) {
-            if (slice_length > 0) {
-                return slice_length;
-            }
-            return pinned_payload->get_length();
+        if (slice_length > 0) {
+            return slice_length;
         }
-        return 0;
+        return buffer->size();
     }
 
     const byte_t* data() const {
-        if (owned) {
-            return owned->data() + slice_offset;
+        if (!buffer) {
+            return nullptr;
         }
-        if (pinned_payload) {
-            return pinned_payload->get_data() + slice_offset;
-        }
-        return nullptr;
+        return buffer->data() + slice_offset;
     }
 
     bool empty() const { return size() == 0; }
 };
 
 /**
- * Owning multi-buffer send unit for asio ConstBufferSequence writes.
- * Segment storage is kept alive until the async send completion handler runs.
+ * Multi-buffer unit for asio ConstBufferSequence I/O (send and local forward).
+ * Holds shared_ptrs to segment storage until the async completion handler runs.
+ *
+ * - append / prepend / append_bytes: exclusive buffers (headers, meta, copies).
+ *   Asserts use_count == 1 — callers must std::move the only remaining ref.
+ * - append_buffer_slice: shared pins (recv buffer, payload backing store).
  */
-struct send_buffer_sequence {
-    send_buffer_sequence() = default;
+struct buffer_sequence {
+    buffer_sequence() = default;
 
-    explicit send_buffer_sequence(message_buffer_ptr_t _buffer) {
+    explicit buffer_sequence(message_buffer_ptr_t _buffer) {
         if (_buffer && !_buffer->empty()) {
             append(std::move(_buffer));
         }
     }
 
-    send_buffer_sequence(const byte_t* _data, std::size_t _size) {
+    buffer_sequence(const byte_t* _data, std::size_t _size) {
         if (_data && _size > 0) {
             append_bytes(_data, _size);
         }
@@ -138,34 +133,26 @@ struct send_buffer_sequence {
         if (!_buffer || _buffer->empty()) {
             return;
         }
-        send_segment its_segment;
-        its_segment.owned = std::move(_buffer);
+        // Exclusive: this use case is for the only remaining shared_ptr to these bytes.
+        assert(_buffer.use_count() == 1);
+        buffer_segment its_segment;
+        its_segment.buffer = std::move(_buffer);
         segments_.push_back(std::move(its_segment));
         rebuild_buffers();
     }
 
     /**
-     * Pin a sub-range of an owned buffer (0-copy). Keeps `_buffer` alive for
-     * the lifetime of this sequence.
+     * Pin a sub-range of a shared buffer (0-copy). Keeps `_buffer` alive for
+     * the lifetime of this sequence. May share with other slices / payloads.
      */
     void append_buffer_slice(message_buffer_ptr_t _buffer, std::size_t _offset, std::size_t _length) {
         if (!_buffer || _length == 0 || _offset + _length > _buffer->size()) {
             return;
         }
-        send_segment its_segment;
-        its_segment.owned = std::move(_buffer);
+        buffer_segment its_segment;
+        its_segment.buffer = std::move(_buffer);
         its_segment.slice_offset = _offset;
         its_segment.slice_length = _length;
-        segments_.push_back(std::move(its_segment));
-        rebuild_buffers();
-    }
-
-    void append_payload(std::shared_ptr<payload> _payload) {
-        if (!_payload || _payload->get_length() == 0) {
-            return;
-        }
-        send_segment its_segment;
-        its_segment.pinned_payload = std::move(_payload);
         segments_.push_back(std::move(its_segment));
         rebuild_buffers();
     }
@@ -181,13 +168,14 @@ struct send_buffer_sequence {
         if (!_buffer || _buffer->empty()) {
             return;
         }
-        send_segment its_segment;
-        its_segment.owned = std::move(_buffer);
+        assert(_buffer.use_count() == 1);
+        buffer_segment its_segment;
+        its_segment.buffer = std::move(_buffer);
         segments_.insert(segments_.begin(), std::move(its_segment));
         rebuild_buffers();
     }
 
-    void append_sequence(const send_buffer_sequence& _other) {
+    void append_sequence(const buffer_sequence& _other) {
         segments_.insert(segments_.end(), _other.segments_.begin(), _other.segments_.end());
         completions_.insert(completions_.end(), _other.completions_.begin(), _other.completions_.end());
         rebuild_buffers();
@@ -218,14 +206,14 @@ struct send_buffer_sequence {
 
     std::size_t size() const {
         return std::accumulate(segments_.begin(), segments_.end(), std::size_t{0},
-                               [](std::size_t sum, const send_segment& s) { return sum + s.size(); });
+                               [](std::size_t sum, const buffer_segment& s) { return sum + s.size(); });
     }
 
     bool empty() const { return size() == 0; }
 
     const std::vector<boost::asio::const_buffer>& buffers() const { return buffers_; }
 
-    const std::vector<send_segment>& segments() const { return segments_; }
+    const std::vector<buffer_segment>& segments() const { return segments_; }
 
     /**
      * Read a big-endian uint16 from a logical offset across the sequence.
@@ -260,8 +248,8 @@ struct send_buffer_sequence {
      * (e.g. SOME/IP-TP split / trace callbacks). Normal send uses buffers().
      */
     message_buffer_ptr_t flatten() const {
-        if (segments_.size() == 1 && segments_.front().owned && segments_.front().slice_length == 0) {
-            return segments_.front().owned;
+        if (segments_.size() == 1 && segments_.front().buffer && segments_.front().slice_length == 0) {
+            return segments_.front().buffer;
         }
         auto flat = std::make_shared<message_buffer_t>();
         flat->reserve(size());
@@ -288,27 +276,27 @@ private:
         }
     }
 
-    std::vector<send_segment> segments_;
+    std::vector<buffer_segment> segments_;
     std::vector<boost::asio::const_buffer> buffers_;
     std::vector<send_completion_state_ptr_t> completions_;
 };
 
-typedef std::shared_ptr<send_buffer_sequence> send_buffer_sequence_ptr_t;
+typedef std::shared_ptr<buffer_sequence> buffer_sequence_ptr_t;
 
 struct train {
     train() :
-        sequence_(std::make_shared<send_buffer_sequence>()), minimal_debounce_time_(DEFAULT_NANOSECONDS_MAX),
+        sequence_(std::make_shared<buffer_sequence>()), minimal_debounce_time_(DEFAULT_NANOSECONDS_MAX),
         minimal_max_retention_time_(DEFAULT_NANOSECONDS_MAX), departure_(std::chrono::steady_clock::now() + std::chrono::hours(6)) { }
 
     void reset() {
-        sequence_ = std::make_shared<send_buffer_sequence>();
+        sequence_ = std::make_shared<buffer_sequence>();
         passengers_.clear();
         minimal_debounce_time_ = DEFAULT_NANOSECONDS_MAX;
         minimal_max_retention_time_ = DEFAULT_NANOSECONDS_MAX;
         departure_ = std::chrono::steady_clock::now() + std::chrono::hours(6);
     }
 
-    send_buffer_sequence_ptr_t sequence_;
+    buffer_sequence_ptr_t sequence_;
     std::set<std::pair<service_t, method_t>> passengers_;
 
     std::chrono::nanoseconds minimal_debounce_time_;

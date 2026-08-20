@@ -196,7 +196,7 @@ void udp_client_endpoint_impl::restart(bool _force) {
     start_connect_timer();
 }
 
-void udp_client_endpoint_impl::send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) {
+void udp_client_endpoint_impl::send_queued(std::pair<buffer_sequence_ptr_t, uint32_t>& _entry) {
 
 #if 0
     std::stringstream msg;
@@ -405,7 +405,7 @@ std::string udp_client_endpoint_impl::get_remote_information() const {
 }
 
 void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                        const send_buffer_sequence_ptr_t& _sent_msg) {
+                                        const buffer_sequence_ptr_t& _sent_msg) {
     (void)_bytes;
     if (!_error) {
         std::lock_guard<std::recursive_mutex> its_lock(mutex_);

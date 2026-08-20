@@ -20,15 +20,15 @@ Scatter-gather removed (4). Hole-free E2E removed (1). This work removes (2) and
 
 ## Target
 
-| Stage                               | Before                               | After                                       |
-| ----------------------------------- | ------------------------------------ | ------------------------------------------- |
-| App `set_data(ptr)`                 | 1× into `shared_ptr<payload>`        | unchanged (unavoidable from stack/temp)     |
-| App `set_data(move(vec))`           | 0×                                   | 0×                                          |
-| Serialize full frame                | 1×                                   | **skipped** on routing-host `send(message)` |
-| E2E plugin app copy                 | 1×                                   | **0×** (span into payload)                  |
-| Routing `send_buffer_sequence(ptr)` | 1×                                   | **0×** when sequence pins payload           |
-| nPDU train                          | 0× (refs)                            | 0×                                          |
-| Socket queue                        | holds `shared_ptr`s until `send_cbk` | same                                        |
+| Stage                          | Before                               | After                                       |
+| ------------------------------ | ------------------------------------ | ------------------------------------------- |
+| App `set_data(ptr)`            | 1× into `shared_ptr<payload>`        | unchanged (unavoidable from stack/temp)     |
+| App `set_data(move(vec))`      | 0×                                   | 0×                                          |
+| Serialize full frame           | 1×                                   | **skipped** on routing-host `send(message)` |
+| E2E plugin app copy            | 1×                                   | **0×** (span into payload)                  |
+| Routing `buffer_sequence(ptr)` | 1×                                   | **0×** when sequence pins payload           |
+| nPDU train                     | 0× (refs)                            | 0×                                          |
+| Socket queue                   | holds `shared_ptr`s until `send_cbk` | same                                        |
 
 **Profile 01 exception:** one pack copy into owned buffer (CRC/counter/nibble
 in-band). Header/footer profiles: plugin owns E2E meta only.
@@ -38,7 +38,7 @@ in-band). Header/footer profiles: plugin owns E2E meta only.
 ### Lifetime
 
 `send()` / `notify()` return after queueing. The endpoint holds
-`send_buffer_sequence` until `async_send` / `async_write` completes. Pins on
+`buffer_sequence` until `async_send` / `async_write` completes. Pins on
 `shared_ptr<payload>` (and owned E2E/header vectors) keep bytes alive — no free
 callback.
 
@@ -60,7 +60,7 @@ zero-copy.
 - **`send(message)`:** `ensure_exclusive_message_payload` on the message (shared
   message, or exclusive message whose payload is still shared with the caller).
 
-Routing **always pins** `shared_ptr<payload>` into `send_buffer_sequence`. The
+Routing **always pins** `shared_ptr<payload>` into `buffer_sequence`. The
 `_message_exclusive` flag is not threaded through RM.
 
 ### Optional completion handler
@@ -85,7 +85,7 @@ dispatcher.
 
 - **`protect_result::app_payload`** — non-owning `span` into caller/pinned payload
 - **`protect_result::owned_app_payload`** — Profile 01 packed buffer only
-- **`send_buffer_sequence::append_payload`** — ordered segment; no byte copy
+- **`append_message_payload`** — pins payload backing vector via `append_buffer_slice` (0-copy)
 - **`send_completion_state`** — latch attached to sequences; fired from endpoint
   `send_cbk`
 - **`compose_e2e_protected_sequence`** — SOME/IP header + E2E pieces + pinned payload
@@ -117,8 +117,8 @@ serializer flatten for non-SD messages and always pins `shared_ptr<payload>`
 
 ## Implementation checklist
 
-- [x] Ordered `send_segment` list in `send_buffer_sequence`
-- [x] `append_payload(shared_ptr<payload>)`
+- [x] Ordered `buffer_segment` list in `buffer_sequence`
+- [x] `append_message_payload` → `append_buffer_slice` on payload backing store
 - [x] `protect_result` span + P01 owned buffer
 - [x] Profile protectors: span out, no app copy (except P01)
 - [x] `compose_e2e_*` pins payload
@@ -129,7 +129,7 @@ serializer flatten for non-SD messages and always pins `shared_ptr<payload>`
 - [x] RM stub pins IPC frame; remote send uses header/payload slices
 - [x] Exclusive pin / shared snapshot at `send`/`notify` API boundary (RM always pins)
 - [x] Optional `send_completion_handler_t` on `send`/`notify`/`notify_one`
-- [ ] Receive path (check → strip → deserialize) for app delivery
+- [x] Receive path (check → strip → deliver) for app delivery — see [`receive-copy-elision.md`](receive-copy-elision.md) (endpoint `_pin` plumbing still open)
 - [ ] Avoid stub `send_command` message\_ copy when parsing SEND meta only
 
 ## Related docs

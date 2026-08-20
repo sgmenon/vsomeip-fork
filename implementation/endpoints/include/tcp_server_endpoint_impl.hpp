@@ -39,7 +39,7 @@ public:
     void start();
     void stop(bool _due_to_error);
 
-    bool send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) override;
+    bool send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) override;
     bool send_error(const std::shared_ptr<endpoint_definition> _target, const byte_t* _data, uint32_t _size);
     bool send_queued(const target_data_iterator_type _it);
     void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
@@ -92,7 +92,7 @@ private:
         connection(const std::weak_ptr<tcp_server_endpoint_impl>& _server, std::uint32_t _max_message_size,
                    std::uint32_t _recv_buffer_size_initial, std::uint32_t _buffer_shrink_threshold, bool _use_magic_cookies,
                    boost::asio::io_context& _io, std::chrono::milliseconds _send_timeout);
-        bool send_magic_cookie(send_buffer_sequence_ptr_t& _sequence);
+        bool send_magic_cookie(buffer_sequence_ptr_t& _sequence);
         bool is_magic_cookie(size_t _offset) const;
         void receive_cbk(boost::system::error_code const& _error, std::size_t _bytes);
         void calculate_shrink_count();
