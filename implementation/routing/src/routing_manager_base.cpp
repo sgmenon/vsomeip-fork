@@ -4,6 +4,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <iomanip>
+#include <cstring>
+#include <limits>
 
 #include <vsomeip/runtime.hpp>
 #include <vsomeip/internal/logger.hpp>
@@ -11,6 +13,7 @@
 #include "../include/routing_manager_base.hpp"
 #include "../../configuration/include/debounce_filter_impl.hpp"
 #include "../../protocol/include/send_command.hpp"
+#include "../../endpoints/include/buffer.hpp"
 #include "../../security/include/policy_manager_impl.hpp"
 #include "../../security/include/security.hpp"
 #include "../../tracing/include/connector_impl.hpp"
@@ -1195,24 +1198,58 @@ bool routing_manager_base::send_local_notification(client_t _client, const byte_
 bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const byte_t* _data, uint32_t _size,
                                       instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check) const {
 
-    bool has_sent(false);
-
-    protocol::send_command its_command(_command);
-    its_command.set_client(get_client());
-    its_command.set_instance(_instance);
-    its_command.set_reliable(_reliable);
-    its_command.set_status(_status_check);
-    its_command.set_target(_client);
-    its_command.set_message(std::vector<byte_t>(_data, _data + _size));
-
-    std::vector<byte_t> its_buffer;
-    protocol::error_e its_error;
-    its_command.serialize(its_buffer, its_error);
-    if (its_error == protocol::error_e::ERROR_OK) {
-        has_sent = _target->send(&its_buffer[0], uint32_t(its_buffer.size()));
+    if (!_data || _size == 0) {
+        return false;
     }
 
-    return has_sent;
+    // One owned buffer for the SOME/IP frame; scatter IPC meta + header slice + payload slice.
+    auto its_someip = std::make_shared<message_buffer_t>(_data, _data + _size);
+    auto its_sequence = std::make_shared<send_buffer_sequence>();
+    if (_size > VSOMEIP_FULL_HEADER_SIZE) {
+        its_sequence->append_buffer_slice(its_someip, 0, VSOMEIP_FULL_HEADER_SIZE);
+        its_sequence->append_buffer_slice(its_someip, VSOMEIP_FULL_HEADER_SIZE, _size - VSOMEIP_FULL_HEADER_SIZE);
+    } else {
+        its_sequence->append(std::move(its_someip));
+    }
+    return send_local(_target, _client, its_sequence, _instance, _reliable, _command, _status_check);
+}
+
+bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const send_buffer_sequence_ptr_t& _someip,
+                                      instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check) const {
+
+    if (!_target || !_someip || _someip->empty()) {
+        return false;
+    }
+
+    const std::size_t its_someip_size = _someip->size();
+    const std::size_t its_payload_size = sizeof(instance_t) + sizeof(bool) + sizeof(uint8_t) + sizeof(client_t) + its_someip_size;
+    if (its_payload_size > std::numeric_limits<protocol::command_size_t>::max()) {
+        return false;
+    }
+
+    // [id|version|client|size|instance|reliable|status|target] then SOME/IP segments (scatter).
+    auto its_meta = std::make_shared<message_buffer_t>(protocol::SEND_COMMAND_HEADER_SIZE);
+    (*its_meta)[0] = static_cast<byte_t>(_command);
+    protocol::version_t its_version = protocol::MAX_SUPPORTED_VERSION;
+    std::memcpy(its_meta->data() + protocol::COMMAND_POSITION_VERSION, &its_version, sizeof(its_version));
+    const client_t its_sender = get_client();
+    std::memcpy(its_meta->data() + protocol::COMMAND_POSITION_CLIENT, &its_sender, sizeof(its_sender));
+    const protocol::command_size_t its_cmd_size = static_cast<protocol::command_size_t>(its_payload_size);
+    std::memcpy(its_meta->data() + protocol::COMMAND_POSITION_SIZE, &its_cmd_size, sizeof(its_cmd_size));
+
+    std::size_t its_offset = protocol::COMMAND_POSITION_PAYLOAD;
+    std::memcpy(its_meta->data() + its_offset, &_instance, sizeof(_instance));
+    its_offset += sizeof(_instance);
+    (*its_meta)[its_offset] = static_cast<byte_t>(_reliable);
+    its_offset += sizeof(bool);
+    (*its_meta)[its_offset] = _status_check;
+    its_offset += sizeof(uint8_t);
+    std::memcpy(its_meta->data() + its_offset, &_client, sizeof(_client));
+
+    auto its_ipc = std::make_shared<send_buffer_sequence>();
+    its_ipc->append(std::move(its_meta));
+    its_ipc->append_sequence(*_someip);
+    return _target->send(its_ipc);
 }
 
 bool routing_manager_base::insert_subscription(service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,

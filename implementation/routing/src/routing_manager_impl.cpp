@@ -138,7 +138,7 @@ send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<
 }
 
 send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<e2e::e2e_provider>& _provider, const byte_t* _data,
-                                                          uint32_t _size, instance_t _instance) {
+                                                          uint32_t _size, instance_t _instance, message_buffer_ptr_t _pin = nullptr) {
     if (!_provider || !_data || _size < VSOMEIP_SOMEIP_HEADER_SIZE) {
         return nullptr;
     }
@@ -154,6 +154,7 @@ send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<
         return nullptr;
     }
 
+    // Writable SOME/IP header (length updated after protect). Payload stays pinned when possible.
     auto its_header = std::make_shared<message_buffer_t>(_data, _data + its_base);
     const buffer_view its_app_payload(_data + its_base, _size - its_base);
     e2e::protect_result its_parts = _provider->protect({its_service, its_method}, its_app_payload, _instance);
@@ -168,7 +169,22 @@ send_buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<
 
     auto its_sequence = std::make_shared<send_buffer_sequence>();
     its_sequence->append(its_header);
-    append_protect_result(*its_sequence, its_parts, nullptr);
+
+    auto append_e2e_buf = [&](std::shared_ptr<e2e_buffer>& _buf) {
+        if (_buf && !_buf->empty()) {
+            its_sequence->append(std::move(_buf));
+        }
+    };
+    append_e2e_buf(its_parts.e2e_header);
+    if (its_parts.owned_app_payload) {
+        append_e2e_buf(its_parts.owned_app_payload);
+    } else if (_pin && _data >= _pin->data() && (_data + _size) <= (_pin->data() + _pin->size()) && its_base < _size) {
+        const std::size_t its_offset = static_cast<std::size_t>(_data - _pin->data());
+        its_sequence->append_buffer_slice(_pin, its_offset + its_base, _size - its_base);
+    } else if (!its_parts.app_payload.empty()) {
+        its_sequence->append_bytes(its_parts.app_payload.data(), its_parts.app_payload.size());
+    }
+    append_e2e_buf(its_parts.e2e_footer);
     return its_sequence;
 }
 
@@ -1171,6 +1187,12 @@ bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequ
 bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t _size, instance_t _instance, bool _reliable,
                                 client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _status_check,
                                 bool _sent_from_remote, bool _force) {
+    return send(_client, _data, _size, _instance, _reliable, _bound_client, _sec_client, _status_check, _sent_from_remote, _force, nullptr);
+}
+
+bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t _size, instance_t _instance, bool _reliable,
+                                client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _status_check,
+                                bool _sent_from_remote, bool _force, message_buffer_ptr_t _pin) {
 
     bool is_sent(false);
     if (_size > VSOMEIP_MESSAGE_TYPE_POS) {
@@ -1226,6 +1248,24 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                 uint32_t its_send_size = _size;
                 message_buffer_ptr_t its_trace_flat;
 
+                // If `_data` lives in `_pin`, prefer header/payload slices over a full-frame copy.
+                auto build_unprotected_sequence = [&]() -> send_buffer_sequence_ptr_t {
+                    auto its_sequence = std::make_shared<send_buffer_sequence>();
+                    if (_pin && _data >= _pin->data() && (_data + _size) <= (_pin->data() + _pin->size())) {
+                        const std::size_t its_offset = static_cast<std::size_t>(_data - _pin->data());
+                        if (_size > VSOMEIP_FULL_HEADER_SIZE) {
+                            its_sequence->append_buffer_slice(_pin, its_offset, VSOMEIP_FULL_HEADER_SIZE);
+                            its_sequence->append_buffer_slice(_pin, its_offset + VSOMEIP_FULL_HEADER_SIZE,
+                                                              _size - VSOMEIP_FULL_HEADER_SIZE);
+                        } else {
+                            its_sequence->append_buffer_slice(_pin, its_offset, _size);
+                        }
+                    } else {
+                        its_sequence = std::make_shared<send_buffer_sequence>(_data, _size);
+                    }
+                    return its_sequence;
+                };
+
                 if (e2e_provider_) {
                     // GM - Begin
                     if (is_service_discovery) {
@@ -1234,7 +1274,7 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                         VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting non-SD message ..";
                     }
 #ifndef ANDROID
-                    its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, _instance);
+                    its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, _instance, _pin);
                     if (its_e2e_sequence) {
                         its_send_size = static_cast<uint32_t>(its_e2e_sequence->size());
                         its_trace_flat = its_e2e_sequence->flatten();
@@ -1246,8 +1286,7 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                 if (is_request) {
                     its_target = ep_mgr_impl_->find_or_create_remote_client(its_service, _instance, _reliable);
                     if (its_target) {
-                        auto its_sequence =
-                                its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
+                        auto its_sequence = its_e2e_sequence ? its_e2e_sequence : build_unprotected_sequence();
                         is_sent = its_target->send(its_sequence);
                         if (is_sent) {
                             trace::header its_header;
@@ -1316,7 +1355,7 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
 
                                 for (auto const& target : its_targets) {
                                     auto its_sequence =
-                                            its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
+                                            its_e2e_sequence ? its_e2e_sequence : build_unprotected_sequence();
                                     if (target->is_reliable()) {
                                         its_tcp_server_endpoint->send_to(target, its_sequence);
                                     } else {
@@ -1349,7 +1388,7 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                                                               : its_info->get_endpoint(_reliable);
                             if (its_target) {
                                 auto its_sequence =
-                                        its_e2e_sequence ? its_e2e_sequence : std::make_shared<send_buffer_sequence>(_data, _size);
+                                        its_e2e_sequence ? its_e2e_sequence : build_unprotected_sequence();
                                 is_sent = its_target->send(its_sequence);
                                 if (is_sent) {
                                     trace::header its_header;
@@ -1834,7 +1873,7 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
 
 bool routing_manager_impl::on_message(service_t _service, instance_t _instance, const byte_t* _data, length_t _size, bool _reliable,
                                       client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _check_status,
-                                      bool _is_from_remote) {
+                                      bool _is_from_remote, message_buffer_ptr_t _pin) {
 #if 0
     std::stringstream msg;
     msg << "rmi::on_message("
@@ -1859,8 +1898,8 @@ bool routing_manager_impl::on_message(service_t _service, instance_t _instance, 
     } else if (its_client == host_->get_client()) {
         deliver_message(_data, _size, _instance, _reliable, _bound_client, _sec_client, _check_status, _is_from_remote);
     } else {
-        send(its_client, _data, _size, _instance, _reliable, _bound_client, _sec_client, _check_status, _is_from_remote,
-             false); // send to proxy
+        send(its_client, _data, _size, _instance, _reliable, _bound_client, _sec_client, _check_status, _is_from_remote, false,
+             _pin); // send to proxy / remote
     }
     return is_forwarded;
 }

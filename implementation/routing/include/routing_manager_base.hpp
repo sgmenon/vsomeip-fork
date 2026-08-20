@@ -25,6 +25,7 @@
 #include "../../message/include/serializer.hpp"
 #include "../../message/include/deserializer.hpp"
 #include "../../protocol/include/protocol.hpp"
+#include "../../endpoints/include/buffer.hpp"
 #include "../../configuration/include/configuration.hpp"
 #include "../../endpoints/include/endpoint_manager_base.hpp"
 
@@ -161,6 +162,9 @@ protected:
                                  uint8_t _status_check, bool _force);
 
     bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance,
+                    bool _reliable, protocol::id_e _command, uint8_t _status_check) const;
+
+    bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const send_buffer_sequence_ptr_t& _someip, instance_t _instance,
                     bool _reliable, protocol::id_e _command, uint8_t _status_check) const;
 
     bool insert_subscription(service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,

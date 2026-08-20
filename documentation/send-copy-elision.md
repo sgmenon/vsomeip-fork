@@ -65,10 +65,13 @@ entries/options (not a payload), so that path still serializes via
 
 Legacy `send(const byte_t*, size)` (routing stub, SD unicast via `send_via_sd`,
 serialized forwards) still copies once at sequence construction until those
-callers are migrated.
+callers are migrated — except the **local-proxy → RM → remote** path, which
+now pins the IPC frame and scatters SOME/IP header + payload into the remote
+send sequence (E2E still allocates a writable 16-byte header for length).
 
-Local UDS/TCP routing (`send_local`) still flattens once for the IPC command
-format — separate follow-up.
+Local UDS/TCP `send_local` builds scatter `[IPC meta | SOME/IP header | payload]`
+(wire bytes unchanged). Routing-client `send(message)` skips full-frame
+serializer flatten for non-SD messages and pins `shared_ptr<payload>`.
 
 ## Implementation checklist
 
@@ -79,8 +82,11 @@ format — separate follow-up.
 - [x] `compose_e2e_*` pins payload
 - [x] `routing_manager_impl::send(message)` zero-copy path
 - [x] `notify` / `notify_one` pass payload shared_ptr through
-- [ ] Local `send_local` IPC copy elision
-- [ ] Routing-client IPC path (non-routing apps)
+- [x] Local `send_local` IPC scatter (meta + header + payload)
+- [x] Routing-client `send(message)` pin path (non-SD)
+- [x] RM stub pins IPC frame; remote send uses header/payload slices
+- [ ] Receive path (check → strip → deserialize) for app delivery
+- [ ] Avoid stub `send_command` message_ copy when parsing SEND meta only
 
 ## Related docs
 

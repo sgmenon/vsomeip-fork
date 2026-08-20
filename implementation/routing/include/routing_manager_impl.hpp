@@ -81,12 +81,12 @@ public:
 
     bool send(client_t _client, std::shared_ptr<message> _message, bool _force);
 
-    bool send_with_sequence(client_t _client, send_buffer_sequence_ptr_t _sequence, const std::shared_ptr<message>& _message,
-                            instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
-                            uint8_t _status_check, bool _sent_from_remote, bool _force);
-
     bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
               const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force);
+
+    bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
+              const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force,
+              message_buffer_ptr_t _pin);
 
     bool send_to(const client_t _client, const std::shared_ptr<endpoint_definition>& _target, std::shared_ptr<message> _message);
 
@@ -139,7 +139,8 @@ public:
     void on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
                     const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port);
     bool on_message(service_t _service, instance_t _instance, const byte_t* _data, length_t _size, bool _reliable, client_t _bound_client,
-                    const vsomeip_sec_client_t* _sec_client, uint8_t _check_status = 0, bool _is_from_remote = false);
+                    const vsomeip_sec_client_t* _sec_client, uint8_t _check_status = 0, bool _is_from_remote = false,
+                    message_buffer_ptr_t _pin = nullptr);
     void on_notification(client_t _client, service_t _service, instance_t _instance, const byte_t* _data, length_t _size, bool _notify_one);
 
     bool offer_service_remotely(service_t _service, instance_t _instance, std::uint16_t _port, bool _reliable, bool _magic_cookies_enabled);
@@ -339,6 +340,10 @@ private:
     void send_suspend() const;
 
     void clear_local_services();
+
+    bool send_with_sequence(client_t _client, send_buffer_sequence_ptr_t _sequence, const std::shared_ptr<message>& _message,
+                            instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
+                            uint8_t _status_check, bool _sent_from_remote, bool _force);
 
     bool is_acl_message_allowed(endpoint* _receiver, service_t _service, instance_t _instance,
                                 const boost::asio::ip::address& _remote_address) const;

@@ -74,4 +74,31 @@ TEST(send_buffer_sequence_test, read_uint16_be_handles_cross_buffer) {
     EXPECT_EQ(value, 0x3456);
 }
 
+TEST(send_buffer_sequence_test, append_buffer_slice_shares_backing_store) {
+    auto buf = std::make_shared<vsomeip_v3::message_buffer_t>();
+    for (std::uint8_t i = 0; i < 8; ++i) {
+        buf->push_back(i);
+    }
+
+    vsomeip_v3::send_buffer_sequence sequence;
+    sequence.append_buffer_slice(buf, 0, 2);
+    sequence.append_buffer_slice(buf, 2, 6);
+
+    ASSERT_EQ(sequence.size(), 8U);
+    ASSERT_EQ(sequence.buffers().size(), 2U);
+    EXPECT_EQ(sequence.buffers()[0].size(), 2U);
+    EXPECT_EQ(sequence.buffers()[1].size(), 6U);
+
+    std::uint16_t value = 0;
+    ASSERT_TRUE(sequence.read_uint16_be(0U, value));
+    EXPECT_EQ(value, 0x0001);
+    ASSERT_TRUE(sequence.read_uint16_be(6U, value));
+    EXPECT_EQ(value, 0x0607);
+
+    // Slices must keep the shared buffer alive after local shared_ptr drops.
+    buf.reset();
+    ASSERT_TRUE(sequence.read_uint16_be(0U, value));
+    EXPECT_EQ(value, 0x0001);
+}
+
 } // namespace

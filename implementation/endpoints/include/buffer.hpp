@@ -33,21 +33,39 @@ typedef std::vector<byte_t> message_buffer_t;
 typedef std::shared_ptr<message_buffer_t> message_buffer_ptr_t;
 
 /**
- * One ordered piece of a send_buffer_sequence: either an owned vector or a
- * pinned application payload (no byte copy).
+ * One ordered piece of a send_buffer_sequence: owned vector (full or slice),
+ * or pinned application payload (no byte copy).
  */
 struct send_segment {
     message_buffer_ptr_t owned;
     std::shared_ptr<payload> pinned_payload;
+    std::size_t slice_offset{0};
+    std::size_t slice_length{0}; // 0 => entire owned buffer / payload
 
     std::size_t size() const {
         if (owned) {
+            if (slice_length > 0) {
+                return slice_length;
+            }
             return owned->size();
         }
         if (pinned_payload) {
+            if (slice_length > 0) {
+                return slice_length;
+            }
             return pinned_payload->get_length();
         }
         return 0;
+    }
+
+    const byte_t* data() const {
+        if (owned) {
+            return owned->data() + slice_offset;
+        }
+        if (pinned_payload) {
+            return pinned_payload->get_data() + slice_offset;
+        }
+        return nullptr;
     }
 
     bool empty() const { return size() == 0; }
@@ -78,6 +96,22 @@ struct send_buffer_sequence {
         }
         send_segment its_segment;
         its_segment.owned = std::move(_buffer);
+        segments_.push_back(std::move(its_segment));
+        rebuild_buffers();
+    }
+
+    /**
+     * Pin a sub-range of an owned buffer (0-copy). Keeps `_buffer` alive for
+     * the lifetime of this sequence.
+     */
+    void append_buffer_slice(message_buffer_ptr_t _buffer, std::size_t _offset, std::size_t _length) {
+        if (!_buffer || _length == 0 || _offset + _length > _buffer->size()) {
+            return;
+        }
+        send_segment its_segment;
+        its_segment.owned = std::move(_buffer);
+        its_segment.slice_offset = _offset;
+        its_segment.slice_length = _length;
         segments_.push_back(std::move(its_segment));
         rebuild_buffers();
     }
@@ -142,21 +176,12 @@ struct send_buffer_sequence {
     bool read_byte(std::size_t _offset, byte_t& _out) const {
         std::size_t remaining = _offset;
         for (const auto& its_segment : segments_) {
-            if (its_segment.owned) {
-                const auto& buf = its_segment.owned;
-                if (remaining < buf->size()) {
-                    _out = (*buf)[remaining];
-                    return true;
-                }
-                remaining -= buf->size();
-            } else if (its_segment.pinned_payload) {
-                const auto its_length = its_segment.pinned_payload->get_length();
-                if (remaining < its_length) {
-                    _out = its_segment.pinned_payload->get_data()[remaining];
-                    return true;
-                }
-                remaining -= its_length;
+            const std::size_t its_size = its_segment.size();
+            if (remaining < its_size) {
+                _out = its_segment.data()[remaining];
+                return true;
             }
+            remaining -= its_size;
         }
         return false;
     }
@@ -167,17 +192,15 @@ struct send_buffer_sequence {
      * (e.g. SOME/IP-TP split / trace callbacks). Normal send uses buffers().
      */
     message_buffer_ptr_t flatten() const {
-        if (segments_.size() == 1 && segments_.front().owned) {
+        if (segments_.size() == 1 && segments_.front().owned && segments_.front().slice_length == 0) {
             return segments_.front().owned;
         }
         auto flat = std::make_shared<message_buffer_t>();
         flat->reserve(size());
         for (const auto& its_segment : segments_) {
-            if (its_segment.owned) {
-                flat->insert(flat->end(), its_segment.owned->begin(), its_segment.owned->end());
-            } else if (its_segment.pinned_payload) {
-                const byte_t* its_data = its_segment.pinned_payload->get_data();
-                const auto its_length = its_segment.pinned_payload->get_length();
+            const byte_t* its_data = its_segment.data();
+            const auto its_length = its_segment.size();
+            if (its_data && its_length > 0) {
                 flat->insert(flat->end(), its_data, its_data + its_length);
             }
         }
@@ -189,11 +212,10 @@ private:
         buffers_.clear();
         buffers_.reserve(segments_.size());
         for (const auto& its_segment : segments_) {
-            if (its_segment.owned && !its_segment.owned->empty()) {
-                buffers_.emplace_back(boost::asio::buffer(*its_segment.owned));
-            } else if (its_segment.pinned_payload && its_segment.pinned_payload->get_length() > 0) {
-                buffers_.emplace_back(
-                        boost::asio::buffer(its_segment.pinned_payload->get_data(), its_segment.pinned_payload->get_length()));
+            const byte_t* its_data = its_segment.data();
+            const auto its_length = its_segment.size();
+            if (its_data && its_length > 0) {
+                buffers_.emplace_back(boost::asio::buffer(its_data, its_length));
             }
         }
     }
