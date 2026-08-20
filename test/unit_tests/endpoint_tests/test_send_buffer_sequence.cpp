@@ -8,6 +8,9 @@
 #include <cstdint>
 
 #include "../../../implementation/endpoints/include/buffer.hpp"
+#include "../../../implementation/routing/include/payload_ownership.hpp"
+#include "../../../implementation/message/include/message_impl.hpp"
+#include "../../../implementation/message/include/payload_impl.hpp"
 #include <vsomeip/span.hpp>
 
 #if defined(__has_include)
@@ -99,6 +102,107 @@ TEST(send_buffer_sequence_test, append_buffer_slice_shares_backing_store) {
     buf.reset();
     ASSERT_TRUE(sequence.read_uint16_be(0U, value));
     EXPECT_EQ(value, 0x0001);
+}
+
+TEST(send_buffer_sequence_test, completion_fires_once_after_pending) {
+    int calls = 0;
+    bool last_ok = false;
+    auto latch = std::make_shared<vsomeip_v3::send_completion_state>([&](bool ok) {
+        ++calls;
+        last_ok = ok;
+    });
+
+    latch->begin();
+    latch->add_pending(2);
+
+    vsomeip_v3::send_buffer_sequence a;
+    vsomeip_v3::send_buffer_sequence b;
+    a.attach_completion(latch);
+    b.attach_completion(latch);
+
+    a.complete(true);
+    EXPECT_EQ(calls, 0);
+    b.complete(true);
+    latch->end();
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(last_ok);
+}
+
+TEST(send_buffer_sequence_test, append_sequence_merges_completions) {
+    int calls = 0;
+    auto latch = std::make_shared<vsomeip_v3::send_completion_state>([&](bool) { ++calls; });
+    latch->begin();
+    latch->add_pending(1);
+
+    vsomeip_v3::send_buffer_sequence passenger;
+    passenger.attach_completion(latch);
+
+    vsomeip_v3::send_buffer_sequence train;
+    train.append_sequence(passenger);
+    train.complete(true);
+    latch->end();
+
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(send_buffer_sequence_test, snapshot_payload_if_shared_copies_when_shared) {
+    auto original = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{1, 2, 3});
+    auto kept = original;
+    auto result = vsomeip_v3::snapshot_payload_if_shared(original);
+    ASSERT_NE(result, nullptr);
+    EXPECT_NE(result.get(), kept.get());
+    EXPECT_EQ(result->get_length(), 3U);
+    EXPECT_EQ(result->get_data()[0], 1);
+    kept->set_data(std::vector<vsomeip_v3::byte_t>{9, 9, 9});
+    EXPECT_EQ(result->get_data()[0], 1);
+}
+
+TEST(send_buffer_sequence_test, snapshot_payload_if_shared_pins_when_exclusive) {
+    auto exclusive = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{4, 5});
+    auto* raw = exclusive.get();
+    auto result = vsomeip_v3::snapshot_payload_if_shared(std::move(exclusive));
+    EXPECT_EQ(result.get(), raw);
+}
+
+TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_message_shared) {
+    std::shared_ptr<vsomeip_v3::message> message = std::make_shared<vsomeip_v3::message_impl>();
+    auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{1, 2, 3});
+    message->set_payload(payload);
+    auto kept_message = message;
+    auto* original = payload.get();
+
+    vsomeip_v3::ensure_exclusive_message_payload(message);
+
+    EXPECT_NE(message->get_payload().get(), original);
+    EXPECT_EQ(message->get_payload()->get_length(), 3U);
+    payload->set_data(std::vector<vsomeip_v3::byte_t>{9, 9, 9});
+    EXPECT_EQ(message->get_payload()->get_data()[0], 1);
+    (void)kept_message;
+}
+
+TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_pins_when_exclusive) {
+    std::shared_ptr<vsomeip_v3::message> message = std::make_shared<vsomeip_v3::message_impl>();
+    auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{7, 8});
+    message->set_payload(std::move(payload));
+    auto* raw = message->get_payload().get();
+
+    vsomeip_v3::ensure_exclusive_message_payload(message);
+
+    EXPECT_EQ(message->get_payload().get(), raw);
+}
+
+TEST(send_buffer_sequence_test, ensure_exclusive_message_payload_snapshots_when_payload_kept) {
+    std::shared_ptr<vsomeip_v3::message> message = std::make_shared<vsomeip_v3::message_impl>();
+    auto payload = std::make_shared<vsomeip_v3::payload_impl>(std::vector<vsomeip_v3::byte_t>{3, 4, 5});
+    message->set_payload(payload);
+    auto* original = payload.get();
+
+    // Exclusive message, but caller still holds the payload.
+    vsomeip_v3::ensure_exclusive_message_payload(message);
+
+    EXPECT_NE(message->get_payload().get(), original);
+    payload->set_data(std::vector<vsomeip_v3::byte_t>{0, 0, 0});
+    EXPECT_EQ(message->get_payload()->get_data()[0], 3);
 }
 
 } // namespace

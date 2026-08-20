@@ -410,8 +410,12 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
     if (!_error) {
         std::lock_guard<std::recursive_mutex> its_lock(mutex_);
         if (queue_.size() > 0) {
-            queue_size_ -= queue_.front().first->size();
+            auto its_sequence = queue_.front().first;
+            queue_size_ -= its_sequence->size();
             queue_.pop_front();
+            if (its_sequence) {
+                its_sequence->complete(true);
+            }
 
             update_last_departure();
 
@@ -423,6 +427,8 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
                     send_queued(its_entry);
                 }
             }
+        } else if (_sent_msg) {
+            _sent_msg->complete(true);
         }
         return;
     } else if (_error == boost::asio::error::broken_pipe) {
@@ -431,6 +437,11 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
             std::lock_guard<std::recursive_mutex> its_lock(mutex_);
             stopping = sending_blocked_;
             if (stopping) {
+                for (auto& its_entry : queue_) {
+                    if (its_entry.first) {
+                        its_entry.first->complete(false);
+                    }
+                }
                 queue_.clear();
                 queue_size_ = 0;
             } else {
@@ -462,6 +473,11 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
             VSOMEIP_WARNING << "uce::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value() << ") "
                             << get_remote_information();
             std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+            for (auto& its_entry : queue_) {
+                if (its_entry.first) {
+                    its_entry.first->complete(false);
+                }
+            }
             queue_.clear();
             queue_size_ = 0;
         }
@@ -472,6 +488,16 @@ void udp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
         VSOMEIP_WARNING << "uce::send_cbk received error: " << _error.message();
         // endpoint was stopped
         sending_blocked_ = true;
+        {
+            std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+            for (auto& its_entry : queue_) {
+                if (its_entry.first) {
+                    its_entry.first->complete(false);
+                }
+            }
+            queue_.clear();
+            queue_size_ = 0;
+        }
         shutdown_and_close_socket(false, false);
     } else {
         if (state_ == cei_state_e::CONNECTING) {

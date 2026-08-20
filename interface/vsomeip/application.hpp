@@ -416,10 +416,20 @@ public:
      * automatically built from the client identifier and the session
      * identifier.
      *
+     * Zero-copy: pass an exclusive `shared_ptr` (e.g. `std::move(msg)`) so the
+     * payload can be pinned. If you keep a live `shared_ptr` to the message,
+     * the payload bytes are snapshotted once before send.
+     *
+     * Optional `_completion` is invoked once when all local async writes
+     * started by this call in this process have finished. Proxy clients: IPC
+     * write to the routing manager only. Routing host: remote /
+     * local-subscriber writes started here.
+     *
      * \param _message Message object.
+     * \param _completion Optional local-write completion handler.
      *
      */
-    virtual void send(std::shared_ptr<message> _message) = 0;
+    virtual void send(std::shared_ptr<message> _message, send_completion_handler_t _completion = nullptr) = 0;
 
     /**
      *
@@ -433,16 +443,25 @@ public:
      * Note: Prior to using this method, @ref offer_event has to be called by
      * the service provider.
      *
+     * Zero-copy: pass an exclusive payload (`std::move`) to pin without copying.
+     * If you keep a live `shared_ptr`, bytes are snapshotted once so later
+     * `set_data` cannot corrupt in-flight sends.
+     *
+     * Optional `_completion` covers local async writes started by this call
+     * (same semantics as @ref send).
+     *
      * \param _service Service identifier of the service that contains the
      * event.
      * \param _instance Instance identifier of the service instance that
      * holds the event.
      * \param _event Event identifier of the event.
      * \param _payload Serialized payload of the event.
+     * \param _force Force update even if payload is unchanged (fields).
+     * \param _completion Optional local-write completion handler.
      *
      */
     virtual void notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                        bool _force = false) const = 0;
+                        bool _force = false, send_completion_handler_t _completion = nullptr) const = 0;
 
     /**
      *
@@ -463,10 +482,12 @@ public:
      * \param _event Event identifier of the event.
      * \param _payload Serialized payload of the event.
      * \param _client Target client.
+     * \param _force Force update even if payload is unchanged (fields).
+     * \param _completion Optional local-write completion handler.
      *
      */
     virtual void notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, client_t _client,
-                            bool _force = false) const = 0;
+                            bool _force = false, send_completion_handler_t _completion = nullptr) const = 0;
 
     /**
      *

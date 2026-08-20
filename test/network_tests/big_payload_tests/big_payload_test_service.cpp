@@ -199,10 +199,10 @@ void big_payload_test_service::run() {
                 its_payload_data.assign(big_payload_test::BIG_PAYLOAD_SIZE, big_payload_test::DATA_SERVICE_TO_CLIENT);
             }
 
-            its_payload->set_data(its_payload_data);
-            its_response->set_payload(its_payload);
+            its_payload->set_data(std::move(its_payload_data));
+            its_response->set_payload(std::move(its_payload));
 
-            app_->send(its_response);
+            app_->send(std::move(its_response));
 
             if (number_of_received_messages_ == expected_messages_) {
                 ASSERT_EQ(expected_messages_, number_of_received_messages_);

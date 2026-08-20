@@ -18,6 +18,7 @@
 #include <vsomeip/vsomeip_sec.h>
 
 #include "types.hpp"
+#include "../../endpoints/include/buffer.hpp"
 
 #include "../../configuration/include/debounce_filter_impl.hpp"
 #ifdef ANDROID
@@ -69,7 +70,8 @@ public:
     virtual void unsubscribe(client_t _client, const vsomeip_sec_client_t* _sec_client, service_t _service, instance_t _instance,
                              eventgroup_t _eventgroup, event_t _event) = 0;
 
-    virtual bool send(client_t _client, std::shared_ptr<message> _message, bool _force) = 0;
+    virtual bool send(client_t _client, std::shared_ptr<message> _message, bool _force,
+                      send_completion_state_ptr_t _completion = nullptr) = 0;
 
     virtual bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable,
                       client_t _bound_client = VSOMEIP_ROUTING_CLIENT, const vsomeip_sec_client_t* _sec_client = nullptr,
@@ -93,10 +95,11 @@ public:
 
     virtual std::set<std::shared_ptr<event>> find_events(service_t _service, instance_t _instance, eventgroup_t _eventgroup) const = 0;
 
-    virtual void notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force) = 0;
+    virtual void notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force,
+                        send_completion_state_ptr_t _completion = nullptr) = 0;
 
     virtual void notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, client_t _client,
-                            bool _force) = 0;
+                            bool _force, send_completion_state_ptr_t _completion = nullptr) = 0;
 
     virtual void send_get_offered_services_info(client_t _client, offer_type_e _offer_type) = 0;
 

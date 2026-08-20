@@ -478,8 +478,8 @@ cc_shared_library(
 cc_import(
     name = "vsomeip-core",
     shared_library = ":vsomeip3-core",
-    deps = [":vsomeip_hdrs"],
     visibility = ["//visibility:public"],
+    deps = [":vsomeip_hdrs"],
 )
 
 # =============================================================================
@@ -525,19 +525,19 @@ cc_shared_library(
     # therefore have exactly one home — `libvsomeip3-core.so.3` — across
     # vsomeip3.so / vsomeip3-sd.so / vsomeip3-cfg.so.
     dynamic_deps = [":vsomeip3-core"],
-    deps = [":vsomeip-lib"],
     visibility = ["//visibility:public"],
+    deps = [":vsomeip-lib"],
 )
 
 # Public boundary for external vsomeip consumers.
 cc_import(
     name = "vsomeip",
     shared_library = ":vsomeip3",
+    visibility = ["//visibility:public"],
     deps = [
         ":vsomeip-core",
         ":vsomeip_hdrs",
     ],
-    visibility = ["//visibility:public"],
 )
 
 # =============================================================================
@@ -664,11 +664,11 @@ genrule(
 cc_import(
     name = "vsomeip-sd",
     shared_library = ":vsomeip3-sd",
+    visibility = ["//visibility:public"],
     deps = [
         ":vsomeip-core",
         ":vsomeip-internal-hdrs",
     ],
-    visibility = ["//visibility:public"],
 )
 
 # =============================================================================
@@ -708,7 +708,10 @@ cc_library(
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    deps = [":vsomeip-core", "@boost.core"],
+    deps = [
+        ":vsomeip-core",
+        "@boost.core",
+    ],
 )
 
 cc_shared_library(

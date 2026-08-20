@@ -512,6 +512,17 @@ void client_endpoint_impl<Protocol>::wait_connecting_cbk(boost::system::error_co
     }
 }
 
+namespace {
+template<typename Queue>
+void fail_queue_completions(Queue& _queue) {
+    for (auto& its_entry : _queue) {
+        if (its_entry.first) {
+            its_entry.first->complete(false);
+        }
+    }
+}
+} // namespace
+
 template<typename Protocol>
 void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
                                               const send_buffer_sequence_ptr_t& _sent_msg) {
@@ -521,8 +532,12 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
     if (!_error) {
         std::lock_guard<std::recursive_mutex> its_lock(mutex_);
         if (queue_.size() > 0) {
-            queue_size_ -= queue_.front().first->size();
+            auto its_sequence = queue_.front().first;
+            queue_size_ -= its_sequence->size();
             queue_.pop_front();
+            if (its_sequence) {
+                its_sequence->complete(true);
+            }
 
             update_last_departure();
 
@@ -538,6 +553,8 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                     is_sending_ = false;
                 }
             }
+        } else if (_sent_msg) {
+            _sent_msg->complete(true);
         }
         return;
     } else if (_error == boost::asio::error::broken_pipe) {
@@ -546,6 +563,9 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                         << get_remote_information() << " endpoint > " << this << " socket state > " << to_string(state_.load());
 
         if (!ensure_connected(_error)) {
+            if (_sent_msg) {
+                _sent_msg->complete(false);
+            }
             return;
         }
 
@@ -554,6 +574,7 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
             std::lock_guard<std::recursive_mutex> its_lock(mutex_);
             stopping = endpoint_impl<Protocol>::sending_blocked_;
             if (stopping) {
+                fail_queue_completions(queue_);
                 queue_.clear();
                 queue_size_ = 0;
             } else {
@@ -587,11 +608,15 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                         << get_remote_information() << " endpoint > " << this << " socket state > " << to_string(state_.load());
 
         if (!ensure_connected(_error)) {
+            if (_sent_msg) {
+                _sent_msg->complete(false);
+            }
             return;
         }
 
         if (_error == boost::asio::error::no_permission) {
             std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+            fail_queue_completions(queue_);
             queue_.clear();
             queue_size_ = 0;
         }
@@ -603,6 +628,13 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
         VSOMEIP_WARNING << "cei::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value()
                         << "), remote: " << get_remote_information() << ", endpoint > " << this << " socket state > "
                         << to_string(state_.load());
+
+        {
+            std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+            fail_queue_completions(queue_);
+            queue_.clear();
+            queue_size_ = 0;
+        }
 
         if (!ensure_connected(_error)) {
             return;

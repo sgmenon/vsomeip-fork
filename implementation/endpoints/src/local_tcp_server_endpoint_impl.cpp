@@ -521,8 +521,10 @@ void local_tcp_server_endpoint_impl::get_configured_times_from_endpoint(service_
 
 void local_tcp_server_endpoint_impl::connection::send_cbk(const send_buffer_sequence_ptr_t _sequence, boost::system::error_code const& _error,
                                                           std::size_t _bytes) {
-    (void)_sequence;
     (void)_bytes;
+    if (_sequence) {
+        _sequence->complete(!_error);
+    }
     if (_error)
         VSOMEIP_WARNING << "ltsei::send_cbk received error: " << _error.message() << " endpoint > " << this;
 }

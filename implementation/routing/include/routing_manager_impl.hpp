@@ -79,7 +79,9 @@ public:
     void unsubscribe(client_t _client, const vsomeip_sec_client_t* _sec_client, service_t _service, instance_t _instance,
                      eventgroup_t _eventgroup, event_t _event);
 
-    bool send(client_t _client, std::shared_ptr<message> _message, bool _force);
+    // service_discovery_host (3-arg) + routing_manager (completion)
+    bool send(client_t _client, std::shared_ptr<message> _message, bool _force) override;
+    bool send(client_t _client, std::shared_ptr<message> _message, bool _force, send_completion_state_ptr_t _completion) override;
 
     bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
               const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force);
@@ -106,7 +108,7 @@ public:
     void unregister_shadow_event(client_t _client, service_t _service, instance_t _instance, event_t _event, bool _is_provided);
 
     void notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, client_t _client,
-                    bool _force);
+                    bool _force, send_completion_state_ptr_t _completion = nullptr) override;
 
     void on_subscribe_ack(client_t _client, service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,
                           remote_subscription_id_t _id);
@@ -343,7 +345,8 @@ private:
 
     bool send_with_sequence(client_t _client, send_buffer_sequence_ptr_t _sequence, const std::shared_ptr<message>& _message,
                             instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
-                            uint8_t _status_check, bool _sent_from_remote, bool _force);
+                            uint8_t _status_check, bool _sent_from_remote, bool _force,
+                            send_completion_state_ptr_t _completion = nullptr);
 
     bool is_acl_message_allowed(endpoint* _receiver, service_t _service, instance_t _instance,
                                 const boost::asio::ip::address& _remote_address) const;

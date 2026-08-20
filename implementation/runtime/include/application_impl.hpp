@@ -27,6 +27,8 @@
 #include <vsomeip/export.hpp>
 #include <vsomeip/application.hpp>
 
+#include "../../endpoints/include/buffer.hpp"
+
 #ifdef ANDROID
 #include "../../configuration/include/internal_android.hpp"
 #else
@@ -86,13 +88,13 @@ public:
 
     VSOMEIP_EXPORT bool is_available(service_t _service, instance_t _instance, major_version_t _major, minor_version_t _minor) const;
 
-    VSOMEIP_EXPORT void send(std::shared_ptr<message> _message);
+    VSOMEIP_EXPORT void send(std::shared_ptr<message> _message, send_completion_handler_t _completion = nullptr) override;
 
     VSOMEIP_EXPORT void notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                               bool _force) const;
+                               bool _force = false, send_completion_handler_t _completion = nullptr) const override;
 
     VSOMEIP_EXPORT void notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                   client_t _client, bool _force) const;
+                                   client_t _client, bool _force = false, send_completion_handler_t _completion = nullptr) const override;
 
     VSOMEIP_EXPORT void register_state_handler(const state_handler_t& _handler);
     VSOMEIP_EXPORT void unregister_state_handler();
@@ -208,7 +210,16 @@ private:
     //
     // Types
     //
-    enum class handler_type_e : uint8_t { MESSAGE, AVAILABILITY, STATE, SUBSCRIPTION, OFFERED_SERVICES_INFO, WATCHDOG, UNKNOWN };
+    enum class handler_type_e : uint8_t {
+        MESSAGE,
+        AVAILABILITY,
+        STATE,
+        SUBSCRIPTION,
+        OFFERED_SERVICES_INFO,
+        WATCHDOG,
+        SEND_COMPLETION,
+        UNKNOWN
+    };
 
     struct sync_handler {
 
@@ -247,6 +258,7 @@ private:
     void invoke_handler(std::shared_ptr<sync_handler>& _handler);
     std::shared_ptr<sync_handler> get_next_handler();
     void reschedule_availability_handler(const std::shared_ptr<sync_handler>& _handler);
+    send_completion_state_ptr_t make_send_completion_latch(send_completion_handler_t _completion) const;
     bool has_active_dispatcher();
     bool is_active_dispatcher(const std::thread::id& _id) const;
     void remove_elapsed_dispatchers();

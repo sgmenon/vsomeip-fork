@@ -31,6 +31,7 @@
 #include "../include/remote_subscription.hpp"
 #include "../include/routing_manager_host.hpp"
 #include "../include/routing_manager_impl.hpp"
+#include "../include/payload_ownership.hpp"
 #include "../include/routing_manager_stub.hpp"
 #include "../include/serviceinfo.hpp"
 #include "../../configuration/include/configuration.hpp"
@@ -98,7 +99,7 @@ void append_protect_result(send_buffer_sequence& _sequence, e2e::protect_result&
     if (_parts.owned_app_payload) {
         append_e2e_buf(_parts.owned_app_payload);
     } else if (_payload_pin && _payload_pin->get_length() > 0) {
-        _sequence.append_payload(_payload_pin);
+        append_message_payload(_sequence, _payload_pin);
     } else if (!_parts.app_payload.empty()) {
         _sequence.append_bytes(_parts.app_payload.data(), _parts.app_payload.size());
     }
@@ -223,9 +224,7 @@ send_buffer_sequence_ptr_t build_send_sequence_from_message(const std::shared_pt
 
     auto its_sequence = std::make_shared<send_buffer_sequence>();
     its_sequence->append(build_someip_header_buffer(*_message, its_app_length));
-    if (its_payload && its_app_length > 0) {
-        its_sequence->append_payload(its_payload);
-    }
+    append_message_payload(*its_sequence, its_payload);
     return its_sequence;
 }
 
@@ -963,6 +962,11 @@ void routing_manager_impl::unsubscribe(client_t _client, const vsomeip_sec_clien
 }
 
 bool routing_manager_impl::send(client_t _client, std::shared_ptr<message> _message, bool _force) {
+    return send(_client, _message, _force, nullptr);
+}
+
+bool routing_manager_impl::send(client_t _client, std::shared_ptr<message> _message, bool _force,
+                                send_completion_state_ptr_t _completion) {
     if (utility::is_request(_message->get_message_type())) {
         if (stub_ && !stub_->is_remotely_available(_message->get_service(), _message->get_instance(), _message->get_interface_version())) {
             VSOMEIP_WARNING << std::hex << std::setfill('0') << "rmi:: " << __func__ << " {_client=" << _client
@@ -972,6 +976,10 @@ bool routing_manager_impl::send(client_t _client, std::shared_ptr<message> _mess
                             << "}: Remote service not available. instance=" << std::setw(4) << _message->get_instance()
                             << " version=" << std::setw(4) << _message->get_interface_version();
             if (!_force) {
+                if (_completion) {
+                    _completion->begin();
+                    _completion->end();
+                }
                 return false;
             }
         }
@@ -987,9 +995,17 @@ bool routing_manager_impl::send(client_t _client, std::shared_ptr<message> _mess
                             << "}: Service not available. instance=" << std::setw(4) << _message->get_instance()
                             << " version=" << std::setw(4) << _message->get_interface_version();
             if (!_force) {
+                if (_completion) {
+                    _completion->begin();
+                    _completion->end();
+                }
                 return false;
             }
         }
+    }
+
+    if (_completion) {
+        _completion->begin();
     }
 
 #ifndef ANDROID
@@ -999,18 +1015,26 @@ bool routing_manager_impl::send(client_t _client, std::shared_ptr<message> _mess
 #endif
     if (!its_sequence || its_sequence->empty()) {
         VSOMEIP_ERROR << "rmi::" << __func__ << ": failed to build send sequence.";
+        if (_completion) {
+            _completion->end();
+        }
         return false;
     }
 
     const auto sec_client = get_sec_client();
-    return send_with_sequence(_client, its_sequence, _message, _message->get_instance(), _message->is_reliable(), get_client(), &sec_client,
-                              0, false, _force);
+    const bool is_sent =
+            send_with_sequence(_client, its_sequence, _message, _message->get_instance(), _message->is_reliable(), get_client(),
+                               &sec_client, 0, false, _force, _completion);
+    if (_completion) {
+        _completion->end();
+    }
+    return is_sent;
 }
 
 bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequence_ptr_t _sequence,
                                               const std::shared_ptr<message>& _message, instance_t _instance, bool _reliable,
                                               client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _status_check,
-                                              bool _sent_from_remote, bool _force) {
+                                              bool _sent_from_remote, bool _force, send_completion_state_ptr_t _completion) {
 
     if (!_sequence || _sequence->empty() || !_message) {
         return false;
@@ -1058,8 +1082,8 @@ bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequ
     uint32_t its_send_size = static_cast<uint32_t>(its_trace_flat->size());
 
     if (its_target) {
-        is_sent = send_local(its_target, its_target_client, its_send_data, its_send_size, _instance, _reliable, protocol::id_e::SEND_ID,
-                             _status_check);
+        is_sent = send_local(its_target, its_target_client, _sequence, _instance, _reliable, protocol::id_e::SEND_ID, _status_check,
+                             _completion);
         if (is_sent
             && ((is_request && its_client == get_client()) || (is_response && find_local_client(its_service, _instance) == get_client())
                 || (is_notification && find_local_client(its_service, _instance) == VSOMEIP_ROUTING_CLIENT))) {
@@ -1076,8 +1100,14 @@ bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequ
             if (is_request) {
                 its_target = ep_mgr_impl_->find_or_create_remote_client(its_service, _instance, _reliable);
                 if (its_target) {
+                    if (_completion) {
+                        _sequence->attach_completion(_completion);
+                    }
                     is_sent = its_target->send(_sequence);
                     if (is_sent) {
+                        if (_completion) {
+                            _completion->add_pending(1);
+                        }
                         trace::header its_header;
                         if (its_header.prepare(its_target, true, _instance))
                             tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
@@ -1091,8 +1121,8 @@ bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequ
                 std::shared_ptr<serviceinfo> its_info(find_service(its_service, _instance));
                 if (its_info || is_service_discovery) {
                     if (is_notification && !is_service_discovery) {
-                        static_cast<void>(
-                                send_local_notification(get_client(), its_send_data, its_send_size, _instance, _reliable, _status_check, _force));
+                        static_cast<void>(send_local_notification(get_client(), _sequence, _instance, _reliable, _status_check, _force,
+                                                                  _completion));
                         std::shared_ptr<event> its_event = find_event(its_service, _instance, its_method);
                         if (its_event) {
                             bool has_sent(false);
@@ -1133,13 +1163,23 @@ bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequ
                                 }
                             }
 
+                            if (_completion && !its_targets.empty()) {
+                                _sequence->attach_completion(_completion);
+                            }
                             for (auto const& target : its_targets) {
+                                bool queued = false;
                                 if (target->is_reliable()) {
-                                    its_tcp_server_endpoint->send_to(target, _sequence);
+                                    queued = its_tcp_server_endpoint->send_to(target, _sequence);
                                 } else {
-                                    its_udp_server_endpoint->send_to(target, _sequence);
+                                    queued = its_udp_server_endpoint->send_to(target, _sequence);
                                 }
-                                has_sent = true;
+                                if (queued) {
+                                    has_sent = true;
+                                    is_sent = true;
+                                    if (_completion) {
+                                        _completion->add_pending(1);
+                                    }
+                                }
                             }
                             if (has_sent) {
                                 trace::header its_header;
@@ -1159,8 +1199,14 @@ bool routing_manager_impl::send_with_sequence(client_t _client, send_buffer_sequ
                         its_target = is_service_discovery ? (sd_info_ ? sd_info_->get_endpoint(false) : nullptr)
                                                           : its_info->get_endpoint(_reliable);
                         if (its_target) {
+                            if (_completion) {
+                                _sequence->attach_completion(_completion);
+                            }
                             is_sent = its_target->send(_sequence);
                             if (is_sent) {
+                                if (_completion) {
+                                    _completion->add_pending(1);
+                                }
                                 trace::header its_header;
                                 if (its_header.prepare(its_target, true, _instance))
                                     tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_send_data, its_send_size);
@@ -1303,8 +1349,9 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                     std::shared_ptr<serviceinfo> its_info(find_service(its_service, _instance));
                     if (its_info || is_service_discovery) {
                         if (is_notification && !is_service_discovery) {
-                            static_cast<void>(send_local_notification(get_client(), its_send_data, its_send_size, _instance, _reliable,
-                                                                      _status_check, _force));
+                            auto its_notify_sequence = its_e2e_sequence ? its_e2e_sequence : build_unprotected_sequence();
+                            static_cast<void>(send_local_notification(get_client(), its_notify_sequence, _instance, _reliable, _status_check,
+                                                                      _force, nullptr));
                             method_t its_method_inner = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
                             std::shared_ptr<event> its_event = find_event(its_service, _instance, its_method_inner);
                             if (its_event) {
@@ -1546,9 +1593,9 @@ void routing_manager_impl::unregister_shadow_event(client_t _client, service_t _
 }
 
 void routing_manager_impl::notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                      client_t _client, bool _force) {
+                                      client_t _client, bool _force, send_completion_state_ptr_t _completion) {
     if (find_local(_client)) {
-        routing_manager_base::notify_one(_service, _instance, _event, _payload, _client, _force);
+        routing_manager_base::notify_one(_service, _instance, _event, _payload, _client, _force, std::move(_completion));
     } else {
         std::shared_ptr<event> its_event = find_event(_service, _instance, _event);
         if (its_event) {
@@ -1577,12 +1624,23 @@ void routing_manager_impl::notify_one(service_t _service, instance_t _instance, 
 
             if (its_targets.size() > 0) {
                 for (const auto& its_target : its_targets) {
-                    its_event->set_payload(_payload, _client, its_target, _force);
+                    its_event->set_payload(_payload, _client, its_target, _force, nullptr);
                 }
+                if (_completion) {
+                    _completion->begin();
+                    _completion->end();
+                }
+            } else if (_completion) {
+                _completion->begin();
+                _completion->end();
             }
         } else {
             VSOMEIP_WARNING << "Attempt to update the undefined event/field [" << std::hex << _service << "." << _instance << "." << _event
                             << "]";
+            if (_completion) {
+                _completion->begin();
+                _completion->end();
+            }
         }
     }
 }
@@ -1709,17 +1767,14 @@ bool routing_manager_impl::stop_offer_service_remotely(service_t _service, insta
 void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
                                       const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address,
                                       std::uint16_t _remote_port) {
-#if 0
-    std::stringstream msg;
-    msg << "rmi::on_message: ";
-    for (uint32_t i = 0; i < _size; ++i)
-    msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(_data[i]) << " ";
-    VSOMEIP_INFO << msg.str();
-#endif
     (void)_bound_client;
     uint8_t its_check_status = e2e::profile_interface::generic_check_status::E2E_OK;
     instance_t its_instance(0x0);
     bool is_forwarded(true);
+#ifndef ANDROID
+    // Must outlive tc_->trace below when E2E strip retargets `_data` into this buffer.
+    message_buffer_ptr_t its_stripped;
+#endif
     // message is at least 16-bytes, see also PRS_SOMEIP_00910
     if (_size < VSOMEIP_FULL_HEADER_SIZE) {
         VSOMEIP_ERROR << "Dropped message with invalid size " << _size;
@@ -1826,9 +1881,7 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
                 }
             }
         }
-#ifndef ANDROID
-        message_buffer_ptr_t its_stripped;
-#endif
+
         if (e2e_provider_) {
 #ifndef ANDROID
             if (e2e_provider_->is_checked({its_service, its_method})) {

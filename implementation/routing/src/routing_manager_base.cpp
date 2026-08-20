@@ -728,20 +728,24 @@ void routing_manager_base::unsubscribe(client_t _client, const vsomeip_sec_clien
     }
 }
 
-void routing_manager_base::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                  bool _force) {
+void routing_manager_base::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force,
+                                  send_completion_state_ptr_t _completion) {
 
     std::shared_ptr<event> its_event = find_event(_service, _instance, _event);
     if (its_event) {
-        its_event->set_payload(_payload, _force);
+        its_event->set_payload(_payload, _force, std::move(_completion));
     } else {
         VSOMEIP_WARNING << "Attempt to update the undefined event/field [" << std::hex << _service << "." << _instance << "." << _event
                         << "]";
+        if (_completion) {
+            _completion->begin();
+            _completion->end();
+        }
     }
 }
 
 void routing_manager_base::notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                      client_t _client, bool _force) {
+                                      client_t _client, bool _force, send_completion_state_ptr_t _completion) {
     std::shared_ptr<event> its_event = find_event(_service, _instance, _event);
     if (its_event) {
         // Event is valid for service/instance
@@ -765,12 +769,17 @@ void routing_manager_base::notify_one(service_t _service, instance_t _instance, 
         }
         if (found_eventgroup) {
             if (already_subscribed) {
-                its_event->set_payload(_payload, _client, _force);
+                its_event->set_payload(_payload, _client, _force, std::move(_completion));
+                return;
             }
         }
     } else {
         VSOMEIP_WARNING << "Attempt to update the undefined event/field [" << std::hex << _service << "." << _instance << "." << _event
                         << "]";
+    }
+    if (_completion) {
+        _completion->begin();
+        _completion->end();
     }
 }
 
@@ -842,7 +851,11 @@ void routing_manager_base::notify_one_current_value(client_t _client, service_t 
     }
 }
 
-bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _message, bool _force) {
+bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _message, bool _force,
+                                send_completion_state_ptr_t _completion) {
+    if (_completion) {
+        _completion->begin();
+    }
     bool is_sent(false);
     if (utility::is_request(_message->get_message_type())) {
         _message->set_client(_client);
@@ -854,6 +867,9 @@ bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _mess
                             << "}: Service not available. instance=" << std::setw(4) << _message->get_instance()
                             << " version=" << std::setw(4) << _message->get_interface_version();
             if (!_force) {
+                if (_completion) {
+                    _completion->end();
+                }
                 return is_sent;
             }
         }
@@ -868,6 +884,10 @@ bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _mess
         put_serializer(its_serializer);
     } else {
         VSOMEIP_ERROR << "Failed to serialize message. Check message size!";
+    }
+    // Serializer fallback has no sequence completion hooks; treat queue acceptance as done.
+    if (_completion) {
+        _completion->end();
     }
     return is_sent;
 }
@@ -1159,13 +1179,21 @@ void routing_manager_base::remove_eventgroup_info(service_t _service, instance_t
     }
 }
 
-bool routing_manager_base::send_local_notification(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance,
-                                                   bool _reliable, uint8_t _status_check, bool _force) {
+bool routing_manager_base::send_local_notification(client_t _client, const send_buffer_sequence_ptr_t& _sequence, instance_t _instance,
+                                                   bool _reliable, uint8_t _status_check, bool _force,
+                                                   send_completion_state_ptr_t _completion) {
     bool has_local(false);
     (void)_client;
     bool has_remote(false);
-    service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-    method_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
+    if (!_sequence || _sequence->empty()) {
+        return false;
+    }
+
+    service_t its_service = 0;
+    method_t its_method = 0;
+    if (!_sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service) || !_sequence->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method)) {
+        return false;
+    }
 
     std::shared_ptr<event> its_event = find_event(its_service, _instance, its_method);
     if (its_event && !its_event->is_shadow()) {
@@ -1180,16 +1208,18 @@ bool routing_manager_base::send_local_notification(client_t _client, const byte_
 
             std::shared_ptr<endpoint> its_local_target = ep_mgr_->find_local(its_client);
             if (its_local_target) {
-                send_local(its_local_target, its_client, _data, _size, _instance, _reliable, protocol::id_e::SEND_ID, _status_check);
+                send_local(its_local_target, its_client, _sequence, _instance, _reliable, protocol::id_e::SEND_ID, _status_check,
+                           _completion);
             }
         }
     }
 
     // Trace the message if a local client but will _not_ be forwarded to the routing manager
     if (has_local && !has_remote) {
+        auto its_flat = _sequence->flatten();
         trace::header its_header;
         if (its_header.prepare(nullptr, true, _instance))
-            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_flat->data(), static_cast<uint32_t>(its_flat->size()));
     }
 
     return has_remote;
@@ -1211,11 +1241,12 @@ bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client
     } else {
         its_sequence->append(std::move(its_someip));
     }
-    return send_local(_target, _client, its_sequence, _instance, _reliable, _command, _status_check);
+    return send_local(_target, _client, its_sequence, _instance, _reliable, _command, _status_check, nullptr);
 }
 
 bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const send_buffer_sequence_ptr_t& _someip,
-                                      instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check) const {
+                                      instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check,
+                                      send_completion_state_ptr_t _completion) const {
 
     if (!_target || !_someip || _someip->empty()) {
         return false;
@@ -1249,7 +1280,15 @@ bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client
     auto its_ipc = std::make_shared<send_buffer_sequence>();
     its_ipc->append(std::move(its_meta));
     its_ipc->append_sequence(*_someip);
-    return _target->send(its_ipc);
+    its_ipc->clear_completions();
+    if (_completion) {
+        its_ipc->attach_completion(_completion);
+    }
+    const bool queued = _target->send(its_ipc);
+    if (queued && _completion) {
+        _completion->add_pending(1);
+    }
+    return queued;
 }
 
 bool routing_manager_base::insert_subscription(service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,

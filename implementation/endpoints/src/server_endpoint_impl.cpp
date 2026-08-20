@@ -679,6 +679,7 @@ void server_endpoint_impl<Protocol>::send_cbk(const endpoint_type _key, boost::s
             its_data.queue_.pop_front();
             recalculate_queue_size(its_data);
         }
+        its_sequence->complete(true);
 
         update_last_departure(its_data);
 
@@ -707,6 +708,11 @@ void server_endpoint_impl<Protocol>::send_cbk(const endpoint_type _key, boost::s
                         << std::setfill('0') << std::setw(4) << its_client << "): [" << std::setw(4) << its_service << "." << std::setw(4)
                         << its_method << "." << std::setw(4) << its_session << "]"
                         << " endpoint -> " << this;
+        for (auto& its_entry : its_data.queue_) {
+            if (its_entry.first) {
+                its_entry.first->complete(false);
+            }
+        }
         cancel_dispatch_timer(it);
         targets_.erase(it);
         if (!prepare_stop_handlers_.empty()) {

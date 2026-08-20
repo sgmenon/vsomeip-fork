@@ -63,16 +63,31 @@ void debounce_test_service::on_stop(const std::shared_ptr<vsomeip::message>&) {
 }
 
 void debounce_test_service::start_test() {
-    auto its_payload = vsomeip::runtime::get()->create_payload();
     auto wakeup_time = std::chrono::steady_clock::now();
+    std::mutex done_mutex;
+    std::condition_variable done_cv;
+
+    auto notify_and_wait = [&](std::initializer_list<vsomeip::byte_t> _data) {
+        auto its_payload = vsomeip::runtime::get()->create_payload();
+        its_payload->set_data(_data);
+
+        bool done = false;
+        app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, std::move(its_payload), false,
+                     [&](bool /*_success*/) {
+                         std::lock_guard<std::mutex> its_lock(done_mutex);
+                         done = true;
+                         done_cv.notify_one();
+                     });
+
+        std::unique_lock<std::mutex> its_lock(done_mutex);
+        done_cv.wait_for(its_lock, std::chrono::seconds(2), [&] { return done; });
+    };
 
     for (int i = 0; i <= 1000; i++) {
-        its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
-        app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+        notify_and_wait({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
         wakeup_time += std::chrono::milliseconds(5);
         std::this_thread::sleep_until(wakeup_time);
-        its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08});
-        app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+        notify_and_wait({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x08});
         wakeup_time += std::chrono::milliseconds(5);
         std::this_thread::sleep_until(wakeup_time);
     }

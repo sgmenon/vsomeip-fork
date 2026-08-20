@@ -102,6 +102,14 @@ typedef std::function<void(routing_state_e)> routing_state_handler_t;
 typedef std::function<void(security_update_state_e)> security_update_handler_t;
 typedef std::function<bool(const message_acceptance_t&)> message_acceptance_handler_t;
 
+/**
+ * Invoked once when all local async sends started by a send/notify call in this
+ * process have completed. `_success` is the AND of those write results.
+ * Proxy clients: covers the IPC write to the routing manager only.
+ * Routing host: covers the remote / local-subscriber writes started here.
+ */
+using send_completion_handler_t = std::function<void(bool _success)>;
+
 } // namespace vsomeip_v3
 
 #endif // VSOMEIP_V3_HANDLER_HPP_

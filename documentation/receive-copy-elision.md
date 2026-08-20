@@ -18,7 +18,7 @@ throws the win away:
    into the pooled deserializer
 3. **`payload_impl::deserialize`** — copies the payload portion again into
    `shared_ptr<payload>`
-4. **`deliver_notification`** — *also* does `create_payload(...)` for debounce
+4. **`deliver_notification`** — _also_ does `create_payload(...)` for debounce
    / filter before calling `deliver_message`, so events pay an extra payload
    copy on top of (2)+(3)
 
@@ -28,24 +28,24 @@ concat when segments arrive separately.
 
 ## Copy inventory (today)
 
-| Stage | Copies | Notes |
-| ----- | ------ | ----- |
-| Socket → `on_message` | **0×** | Pointer into UDP/TCP/local recv buffer |
-| SOME/IP-TP reassemble | **1×** full | Only when TP segments; keep as-is for now |
-| E2E `check()` | **0×** | Spans into recv buffer |
-| E2E `strip_e2e_protected_payload` | **1×** full | Header + app → new `message_buffer_t` |
-| `deserializer::set_data` | **1×** full | Entire frame into deserializer `data_` |
-| `payload_->deserialize` | **1×** payload | Into `payload_impl` |
-| `deliver_notification` `create_payload` | **+1×** payload | Redundant with deliver_message |
-| Proxy `send_local` + client deserialize | **+2–3×** | Separate process; see open questions |
+| Stage                                   | Copies          | Notes                                     |
+| --------------------------------------- | --------------- | ----------------------------------------- |
+| Socket → `on_message`                   | **0×**          | Pointer into UDP/TCP/local recv buffer    |
+| SOME/IP-TP reassemble                   | **1×** full     | Only when TP segments; keep as-is for now |
+| E2E `check()`                           | **0×**          | Spans into recv buffer                    |
+| E2E `strip_e2e_protected_payload`       | **1×** full     | Header + app → new `message_buffer_t`     |
+| `deserializer::set_data`                | **1×** full     | Entire frame into deserializer `data_`    |
+| `payload_->deserialize`                 | **1×** payload  | Into `payload_impl`                       |
+| `deliver_notification` `create_payload` | **+1×** payload | Redundant with deliver_message            |
+| Proxy `send_local` + client deserialize | **+2–3×**       | Separate process; see open questions      |
 
 ### Totals (payload-sized, remote → hosting app)
 
-| Path | Approx. today | Target |
-| ---- | ------------- | ------ |
-| Req/resp, no E2E | ~2× | **0–1×** (pin recv buffer) |
-| Req/resp, with E2E | ~3× | **0–1×** (spans; no strip concat) |
-| Event, with E2E | ~4× | **0–1×** (same + drop notify extract) |
+| Path               | Approx. today | Target                                |
+| ------------------ | ------------- | ------------------------------------- |
+| Req/resp, no E2E   | ~2×           | **0–1×** (pin recv buffer)            |
+| Req/resp, with E2E | ~3×           | **0–1×** (spans; no strip concat)     |
+| Event, with E2E    | ~4×           | **0–1×** (same + drop notify extract) |
 
 Kernel → userspace recv is the only unavoidable copy unless the OS gives a
 zero-copy receive API. Everything after that is middleware tax.
@@ -55,7 +55,7 @@ zero-copy receive API. Everything after that is middleware tax.
 ### Lifetime (same idea as send)
 
 Today `_data` in `on_message` is a bare pointer into the endpoint buffer.
-That only works because routing finishes *before* the next `receive_cbk`
+That only works because routing finishes _before_ the next `receive_cbk`
 reuses / shifts that buffer. Once we stop copying into owned vectors, something
 must keep the bytes alive until:
 
@@ -90,7 +90,7 @@ e2e_header | app_payload | e2e_footer   // spans into recv buffer
 **Delete the concat in `strip_e2e_protected_payload`.** Instead:
 
 - Keep the SOME/IP header view (first 16 bytes of the pinned buffer).
-- Update length in a small **owned** 16-byte header buffer *or* mutate a
+- Update length in a small **owned** 16-byte header buffer _or_ mutate a
   writable copy of only those 16 bytes (not the whole payload).
 - Build delivery from `{ owned_or_viewed SOME/IP header, span app_payload }`
   with E2E header/footer dropped — no `insert` of app bytes.
@@ -177,9 +177,9 @@ Endpoint recv buffer (shared_ptr)
 - [ ] `deliver_notification`: one shared payload for filter + delivery (remove extra `create_payload`)
 - [ ] Unit / network tests: E2E check + strip-by-span; hole-free app payload
 - [ ] Docs: update [`e2e-scatter-gather-send.md`](e2e-scatter-gather-send.md) receive notes
-- [ ] *(open)* Proxy / `send_local` + routing-client deserialize elision
-- [ ] *(open)* TCP/local stream pin when buffer compaction would invalidate slices
-- [ ] *(later)* SOME/IP-TP reassembly without full flatten (scatter-gather receive)
+- [ ] _(open)_ Proxy / `send_local` + routing-client deserialize elision
+- [ ] _(open)_ TCP/local stream pin when buffer compaction would invalidate slices
+- [ ] _(later)_ SOME/IP-TP reassembly without full flatten (scatter-gather receive)
 
 ## Related docs
 

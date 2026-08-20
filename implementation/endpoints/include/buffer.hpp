@@ -7,7 +7,9 @@
 #define VSOMEIP_V3_BUFFER_HPP_
 
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <numeric>
 #include <set>
@@ -31,6 +33,48 @@ namespace vsomeip_v3 {
 
 typedef std::vector<byte_t> message_buffer_t;
 typedef std::shared_ptr<message_buffer_t> message_buffer_ptr_t;
+
+/**
+ * Latch for optional send/notify completion handlers.
+ * Use begin()/add_pending()/end() around synchronous queueing, then each
+ * async write completion calls complete().
+ */
+struct send_completion_state {
+    explicit send_completion_state(std::function<void(bool)> _handler) : handler_(std::move(_handler)) { }
+
+    void begin() { remaining_.fetch_add(1, std::memory_order_acq_rel); }
+
+    void add_pending(int _n = 1) {
+        if (_n > 0) {
+            remaining_.fetch_add(_n, std::memory_order_acq_rel);
+        }
+    }
+
+    void end() { complete(true); }
+
+    void complete(bool _success) {
+        if (!_success) {
+            ok_.store(false, std::memory_order_relaxed);
+        }
+        const int prev = remaining_.fetch_sub(1, std::memory_order_acq_rel);
+        if (prev == 1) {
+            bool expected = false;
+            if (fired_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+                if (handler_) {
+                    handler_(ok_.load(std::memory_order_relaxed));
+                }
+            }
+        }
+    }
+
+private:
+    std::function<void(bool)> handler_;
+    std::atomic<int> remaining_{0};
+    std::atomic<bool> ok_{true};
+    std::atomic<bool> fired_{false};
+};
+
+typedef std::shared_ptr<send_completion_state> send_completion_state_ptr_t;
 
 /**
  * One ordered piece of a send_buffer_sequence: owned vector (full or slice),
@@ -145,8 +189,32 @@ struct send_buffer_sequence {
 
     void append_sequence(const send_buffer_sequence& _other) {
         segments_.insert(segments_.end(), _other.segments_.begin(), _other.segments_.end());
+        completions_.insert(completions_.end(), _other.completions_.begin(), _other.completions_.end());
         rebuild_buffers();
     }
+
+    void attach_completion(send_completion_state_ptr_t _completion) {
+        if (_completion) {
+            completions_.push_back(std::move(_completion));
+        }
+    }
+
+    /**
+     * Notify all attached completion latches (e.g. from endpoint send_cbk).
+     * May be called once per async write of this sequence (fan-out may share
+     * one sequence across targets; the latch remaining count absorbs that).
+     */
+    void complete(bool _success) {
+        for (auto& its_completion : completions_) {
+            if (its_completion) {
+                its_completion->complete(_success);
+            }
+        }
+    }
+
+    void clear_completions() { completions_.clear(); }
+
+    bool has_completion() const { return !completions_.empty(); }
 
     std::size_t size() const {
         return std::accumulate(segments_.begin(), segments_.end(), std::size_t{0},
@@ -222,6 +290,7 @@ private:
 
     std::vector<send_segment> segments_;
     std::vector<boost::asio::const_buffer> buffers_;
+    std::vector<send_completion_state_ptr_t> completions_;
 };
 
 typedef std::shared_ptr<send_buffer_sequence> send_buffer_sequence_ptr_t;

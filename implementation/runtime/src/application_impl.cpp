@@ -37,6 +37,7 @@
 #include "../../plugin/include/plugin_manager_impl.hpp"
 #include "../../routing/include/routing_manager_impl.hpp"
 #include "../../routing/include/routing_manager_client.hpp"
+#include "../../routing/include/payload_ownership.hpp"
 #include "../../security/include/security.hpp"
 #include "../../tracing/include/connector_impl.hpp"
 #include "../../utility/include/utility.hpp"
@@ -856,7 +857,7 @@ availability_state_e application_impl::are_available_unlocked(available_t& _avai
     return availability_state_e::AS_AVAILABLE;
 }
 
-void application_impl::send(std::shared_ptr<message> _message) {
+void application_impl::send(std::shared_ptr<message> _message, send_completion_handler_t _completion) {
 
     // likely that the user created a message (with `runtime::create_message`) and forgot to set the type
     // fail here in an obvious way, instead of down-the-line in some client-lookup code
@@ -864,6 +865,9 @@ void application_impl::send(std::shared_ptr<message> _message) {
         VSOMEIP_ERROR << "application_impl::" << __func__ << ": message [" << std::hex << std::setfill('0') << std::setw(4)
                       << _message->get_service() << "." << std::setw(4) << _message->get_instance() << "." << std::setw(4)
                       << _message->get_method() << "] has unknown type, cannot send!";
+        if (_completion) {
+            _completion(false);
+        }
         return;
     }
 
@@ -884,24 +888,51 @@ void application_impl::send(std::shared_ptr<message> _message) {
             _message->set_client(client_);
             _message->set_session(get_session(true));
         }
-        // Always increment the session-id
-        (void)routing_->send(client_, _message, false);
+        ensure_exclusive_message_payload(_message);
+        auto its_latch = make_send_completion_latch(std::move(_completion));
+        (void)routing_->send(client_, _message, false, std::move(its_latch));
+    } else if (_completion) {
+        _completion(false);
     }
 }
 
-void application_impl::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                              bool _force) const {
+void application_impl::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force,
+                              send_completion_handler_t _completion) const {
 
+    auto its_payload = snapshot_payload_if_shared(std::move(_payload));
+    auto its_latch = make_send_completion_latch(std::move(_completion));
     if (routing_) {
-        routing_->notify(_service, _instance, _event, _payload, _force);
+        routing_->notify(_service, _instance, _event, its_payload, _force, std::move(its_latch));
+    } else if (its_latch) {
+        its_latch->begin();
+        its_latch->end();
     }
 }
 
 void application_impl::notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                  client_t _client, bool _force) const {
+                                  client_t _client, bool _force, send_completion_handler_t _completion) const {
+    auto its_payload = snapshot_payload_if_shared(std::move(_payload));
+    auto its_latch = make_send_completion_latch(std::move(_completion));
     if (routing_) {
-        routing_->notify_one(_service, _instance, _event, _payload, _client, _force);
+        routing_->notify_one(_service, _instance, _event, its_payload, _client, _force, std::move(its_latch));
+    } else if (its_latch) {
+        its_latch->begin();
+        its_latch->end();
     }
+}
+
+send_completion_state_ptr_t application_impl::make_send_completion_latch(send_completion_handler_t _completion) const {
+    if (!_completion) {
+        return nullptr;
+    }
+    auto self = std::const_pointer_cast<application_impl>(shared_from_this());
+    return std::make_shared<send_completion_state>([self, handler = std::move(_completion)](bool _success) {
+        std::scoped_lock its_lock{self->handlers_mutex_};
+        auto its_sync_handler = std::make_shared<sync_handler>([handler, _success]() { handler(_success); });
+        its_sync_handler->handler_type_ = handler_type_e::SEND_COMPLETION;
+        self->handlers_.push_back(its_sync_handler);
+        self->notify_dispatch();
+    });
 }
 
 void application_impl::register_state_handler(const state_handler_t& _handler) {
@@ -2481,6 +2512,9 @@ void application_impl::print_blocking_call(const std::shared_ptr<sync_handler>& 
         break;
     case handler_type_e::WATCHDOG:
         VSOMEIP_WARNING << "BLOCKING CALL WATCHDOG(" << std::hex << std::setfill('0') << std::setw(4) << get_client() << ")";
+        break;
+    case handler_type_e::SEND_COMPLETION:
+        VSOMEIP_WARNING << "BLOCKING CALL SEND_COMPLETION(" << std::hex << std::setfill('0') << std::setw(4) << get_client() << ")";
         break;
     case handler_type_e::UNKNOWN:
         VSOMEIP_WARNING << "BLOCKING CALL UNKNOWN(" << std::hex << std::setfill('0') << std::setw(4) << get_client() << ")";

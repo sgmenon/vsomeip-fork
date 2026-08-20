@@ -74,64 +74,69 @@ void debounce_test_service::on_stop(const std::shared_ptr<vsomeip::message>& _me
     stop();
 }
 
+namespace {
+
+std::shared_ptr<vsomeip::payload> make_payload(std::initializer_list<vsomeip::byte_t> _data) {
+    auto its_payload = vsomeip::runtime::get()->create_payload();
+    its_payload->set_data(std::vector<vsomeip::byte_t>(_data));
+    return its_payload;
+}
+
+void notify_event(const std::shared_ptr<vsomeip::application>& _app, vsomeip::event_t _event,
+                  std::initializer_list<vsomeip::byte_t> _data) {
+    _app->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, _event, make_payload(_data));
+}
+
+} // namespace
+
 void debounce_test_service::start_test() {
 
-    auto its_payload = vsomeip::runtime::get()->create_payload();
+    // Fresh payload per notify (moved in). Do not mutate a shared payload after notify.
 
     // To check if debouncer send the last message after timeout
-    its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
     VSOMEIP_INFO << "Sent first message!";
     std::this_thread::sleep_for(std::chrono::seconds(1));
-    its_payload->set_data({0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent second message!";
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
     // To check normal function of the debouncer
-    its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
     VSOMEIP_INFO << "Sent third message!";
     std::this_thread::sleep_for(std::chrono::seconds(3));
-    its_payload->set_data({0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent fourth message!";
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
     // To check only one message is forwarded after timeout
-    its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
     VSOMEIP_INFO << "Sent fifth message!";
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    its_payload->set_data({0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent sixth message!";
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    its_payload->set_data({0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent seventh message!";
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
     // To check the interaction when two events use the debounce
-    its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
     VSOMEIP_INFO << "Sent eight message!";
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT_2, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT_2, {0x00, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07});
     VSOMEIP_INFO << "Sent first event 2 message!";
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    its_payload->set_data({0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent ninth message!";
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT_2, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT_2, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent second event 2 message!";
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    its_payload->set_data({0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent tenth message!";
-    app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT_2, its_payload);
+    notify_event(app_, DEBOUNCE_EVENT_2, {0x09, 0x09, 0x09, 0x09, 0x09, 0x09, 0x09});
     VSOMEIP_INFO << "Sent third event 2 message!";
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -140,9 +145,10 @@ void debounce_test_service::start_test() {
 
     VSOMEIP_INFO << "Sending lot of messages!";
     for (int i = 0; i < 30; i++) {
-        its_payload->set_data({0x00, 0x02, 0x03, 0x04, 0x05, 0x06, (unsigned char)(i % 16)});
-        app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT, its_payload);
-        app_->notify(DEBOUNCE_SERVICE, DEBOUNCE_INSTANCE, DEBOUNCE_EVENT_2, its_payload);
+        const auto its_data = std::initializer_list<vsomeip::byte_t>{0x00, 0x02, 0x03, 0x04, 0x05, 0x06,
+                                                                     static_cast<vsomeip::byte_t>(i % 16)};
+        notify_event(app_, DEBOUNCE_EVENT, its_data);
+        notify_event(app_, DEBOUNCE_EVENT_2, its_data);
 
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }

@@ -180,13 +180,9 @@ void big_payload_test_client::run() {
     condition_.wait(its_lock, [this] { return blocked_; });
     blocked_ = false;
 
-    request_->set_service(service_id_);
-    request_->set_instance(big_payload_test::TEST_SERVICE_INSTANCE_ID);
-    request_->set_method(big_payload_test::TEST_SERVICE_METHOD_ID);
-
     std::srand(static_cast<unsigned int>(std::time(0)));
 
-    std::shared_ptr<vsomeip::payload> its_payload = vsomeip::runtime::get()->create_payload();
+    const bool use_tcp = request_->is_reliable();
     std::vector<vsomeip::byte_t> its_payload_data;
 
     for (unsigned int i = 0; i < number_of_messages_to_send_; i++) {
@@ -207,13 +203,21 @@ void big_payload_test_client::run() {
         } else {
             its_payload_data.assign(big_payload_test::BIG_PAYLOAD_SIZE, big_payload_test::DATA_CLIENT_TO_SERVICE);
         }
-        its_payload->set_data(its_payload_data);
-        request_->set_payload(its_payload);
-        VSOMEIP_INFO << "Client/Session [" << std::hex << std::setfill('0') << std::setw(4) << request_->get_client() << "/" << std::setw(4)
-                     << request_->get_session() << "] is going to send a request to Service [" << std::setw(4) << request_->get_service()
-                     << "." << std::setw(4) << request_->get_instance() << "] size: " << std::dec << request_->get_payload()->get_length()
+
+        // Exclusive message + payload via std::move so send can pin instead of mutate-after-send.
+        auto its_request = vsomeip::runtime::get()->create_request(use_tcp);
+        its_request->set_service(service_id_);
+        its_request->set_instance(big_payload_test::TEST_SERVICE_INSTANCE_ID);
+        its_request->set_method(big_payload_test::TEST_SERVICE_METHOD_ID);
+        auto its_payload = vsomeip::runtime::get()->create_payload();
+        its_payload->set_data(std::move(its_payload_data));
+        its_request->set_payload(std::move(its_payload));
+        VSOMEIP_INFO << "Client/Session [" << std::hex << std::setfill('0') << std::setw(4) << its_request->get_client() << "/"
+                     << std::setw(4) << its_request->get_session() << "] is going to send a request to Service [" << std::setw(4)
+                     << its_request->get_service() << "." << std::setw(4) << its_request->get_instance()
+                     << "] size: " << std::dec << its_request->get_payload()->get_length()
                      << ". Sent Messages: " << number_of_sent_messages_ + 1;
-        app_->send(request_);
+        app_->send(std::move(its_request));
         if (test_mode_ == big_payload_test::test_mode::QUEUE_LIMITED_GENERAL
             || test_mode_ == big_payload_test::test_mode::QUEUE_LIMITED_SPECIFIC) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1000));

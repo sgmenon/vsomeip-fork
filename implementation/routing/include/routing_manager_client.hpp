@@ -69,7 +69,8 @@ public:
     bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
               const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force);
 
-    bool send(client_t _client, std::shared_ptr<message> _message, bool _force) override;
+    bool send(client_t _client, std::shared_ptr<message> _message, bool _force,
+              send_completion_state_ptr_t _completion = nullptr) override;
 
     bool send_to(const client_t _client, const std::shared_ptr<endpoint_definition>& _target, std::shared_ptr<message> _message);
 
@@ -177,7 +178,8 @@ private:
 
     bool send_with_someip_sequence(client_t _client, const send_buffer_sequence_ptr_t& _sequence, const byte_t* _hdr, length_t _hdr_size,
                                    instance_t _instance, bool _reliable, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
-                                   uint8_t _status_check, bool _sent_from_remote, bool _force);
+                                   uint8_t _status_check, bool _sent_from_remote, bool _force,
+                                   send_completion_state_ptr_t _completion = nullptr);
 
     /**
      * @brief Remove all remote subscriptions.
