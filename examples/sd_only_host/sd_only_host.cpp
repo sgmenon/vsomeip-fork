@@ -418,10 +418,11 @@ public:
         return sd_endpoint_->send(ser.get_data(), ser.get_size());
     }
 
-    bool send_via_sd(const std::shared_ptr<v3::endpoint_definition>& target, const v3::byte_t* data, uint32_t size,
+    bool send_via_sd(const std::shared_ptr<v3::endpoint_definition>& target, v3::message_buffer_ptr_t frame,
                      uint16_t /*sd_port*/) override {
-        if (!sd_endpoint_) return false;
-        return sd_endpoint_->send_to(target, data, size);
+        if (!sd_endpoint_ || !frame || frame->empty())
+            return false;
+        return sd_endpoint_->send_to(target, frame->data(), static_cast<uint32_t>(frame->size()));
     }
 
     // Return a client-side endpoint pointing at a peer whose OfferService

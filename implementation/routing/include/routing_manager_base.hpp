@@ -25,6 +25,7 @@
 #include "../../message/include/serializer.hpp"
 #include "../../message/include/deserializer.hpp"
 #include "../../protocol/include/protocol.hpp"
+#include "../../endpoints/include/buffer.hpp"
 #include "../../configuration/include/configuration.hpp"
 #include "../../endpoints/include/endpoint_manager_base.hpp"
 
@@ -99,14 +100,16 @@ public:
     virtual void unsubscribe(client_t _client, const vsomeip_sec_client_t* _sec_client, service_t _service, instance_t _instance,
                              eventgroup_t _eventgroup, event_t _event);
 
-    virtual void notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force);
+    virtual void notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force,
+                        send_completion_state_ptr_t _completion = nullptr);
 
     virtual void notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, client_t _client,
-                            bool _force);
+                            bool _force, send_completion_state_ptr_t _completion = nullptr);
 
-    virtual bool send(client_t _client, std::shared_ptr<message> _message, bool _force);
+    virtual bool send(client_t _client, std::shared_ptr<message> _message, bool _force,
+                      send_completion_state_ptr_t _completion = nullptr);
 
-    virtual bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
+    virtual bool send(client_t _client, message_buffer_ptr_t _frame, instance_t _instance, bool _reliable, client_t _bound_client,
                       const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force) = 0;
 
     // routing host -> will be implemented by routing_manager_impl/_proxy/
@@ -157,11 +160,14 @@ protected:
 
     void remove_eventgroup_info(service_t _service, instance_t _instance, eventgroup_t _eventgroup);
 
-    bool send_local_notification(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable,
-                                 uint8_t _status_check, bool _force);
+    bool send_local_notification(client_t _client, const buffer_sequence_ptr_t& _sequence, instance_t _instance, bool _reliable,
+                                 uint8_t _status_check, bool _force, send_completion_state_ptr_t _completion = nullptr);
 
-    bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance,
-                    bool _reliable, protocol::id_e _command, uint8_t _status_check) const;
+    bool send_local(std::shared_ptr<endpoint>& _target, client_t _client, const buffer_sequence_ptr_t& _someip, instance_t _instance,
+                    bool _reliable, protocol::id_e _command, uint8_t _status_check,
+                    send_completion_state_ptr_t _completion = nullptr) const;
+
+    static buffer_sequence_ptr_t sequence_from_frame(const message_buffer_ptr_t& _frame);
 
     bool insert_subscription(service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,
                              const std::shared_ptr<debounce_filter_impl_t>& _filter, client_t _client,

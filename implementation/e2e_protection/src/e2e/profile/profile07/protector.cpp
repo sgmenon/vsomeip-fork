@@ -18,7 +18,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
     std::lock_guard<std::mutex> lock(protect_mutex_);
 
     const std::size_t header_size = config_.offset_ + 20;
-    const std::size_t protected_size = header_size + _app_payload.data_length();
+    const std::size_t protected_size = header_size + _app_payload.size();
     if (protected_size < config_.min_data_length_ || protected_size > config_.max_data_length_) {
         return protect_result{};
     }
@@ -28,7 +28,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
     bithelper::write_uint32_be(get_counter(_instance), &(*its_header)[config_.offset_ + PROFILE_07_COUNTER_OFFSET]);
     bithelper::write_uint32_be(config_.data_id_, &(*its_header)[config_.offset_ + PROFILE_07_DATAID_OFFSET]);
 
-    uint64_t its_crc = e2e_crc::calculate_profile_07(buffer_view(*its_header, config_.offset_));
+    uint64_t its_crc = e2e_crc::calculate_profile_07(buffer_view(its_header->data(), config_.offset_));
     e2e_buffer its_after;
     its_after.insert(its_after.end(), its_header->begin() + config_.offset_ + PROFILE_07_SIZE_OFFSET, its_header->end());
     its_after.insert(its_after.end(), _app_payload.begin(), _app_payload.end());
@@ -39,7 +39,7 @@ protect_result protector::protect(buffer_view _app_payload, instance_t _instance
 
     protect_result its_result;
     its_result.e2e_header = std::move(its_header);
-    its_result.app_payload = std::make_shared<e2e_buffer>(_app_payload.begin(), _app_payload.end());
+    its_result.app_payload = _app_payload;
     its_result.valid = true;
     return its_result;
 }

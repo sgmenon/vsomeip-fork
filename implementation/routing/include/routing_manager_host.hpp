@@ -9,6 +9,7 @@
 #include <memory>
 
 #include <boost/asio/io_context.hpp>
+#include <vsomeip/handler.hpp>
 #include <vsomeip/vsomeip_sec.h>
 
 namespace vsomeip_v3 {
@@ -40,7 +41,7 @@ public:
                                  const std::function<void(bool)>& _accepted_cb) = 0;
     virtual void on_subscription_status(service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,
                                         uint16_t _error) = 0;
-    virtual void send(std::shared_ptr<message> _message) = 0;
+    virtual void send(std::shared_ptr<message> _message, send_completion_handler_t _completion = nullptr) = 0;
     virtual void on_offered_services_info(std::vector<std::pair<service_t, instance_t>>& _services) = 0;
     virtual bool is_routing() const = 0;
 };

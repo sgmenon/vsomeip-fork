@@ -28,6 +28,7 @@
 #include "../include/event.hpp"
 #include "../include/routing_manager_host.hpp"
 #include "../include/routing_manager_client.hpp"
+#include "../include/payload_ownership.hpp"
 #include "../../configuration/include/configuration.hpp"
 #include "../../endpoints/include/server_endpoint.hpp"
 #include "../../endpoints/include/abstract_socket_factory.hpp"
@@ -67,6 +68,7 @@
 #include "../../protocol/include/update_security_policy_command.hpp"
 #include "../../protocol/include/update_security_policy_response_command.hpp"
 #include "../../service_discovery/include/runtime.hpp"
+#include "../../service_discovery/include/constants.hpp"
 #include "../../security/include/policy.hpp"
 #include "../../security/include/policy_manager_impl.hpp"
 #include "../../security/include/security.hpp"
@@ -725,9 +727,99 @@ void routing_manager_client::unsubscribe(client_t _client, const vsomeip_sec_cli
     }
 }
 
-bool routing_manager_client::send(client_t _client, const byte_t* _data, length_t _size, instance_t _instance, bool _reliable,
+bool routing_manager_client::send(client_t _client, std::shared_ptr<message> _message, bool _force,
+                                  send_completion_state_ptr_t _completion) {
+    if (!_message) {
+        if (_completion) {
+            _completion->begin();
+            _completion->end();
+        }
+        return false;
+    }
+
+    // SD entries/options require virtual serialize(); fall back to base serializer path.
+    if (_message->get_service() == sd::service && _message->get_method() == sd::method) {
+        return routing_manager_base::send(_client, _message, _force, std::move(_completion));
+    }
+
+    if (utility::is_request(_message->get_message_type())) {
+        _message->set_client(_client);
+        if (!is_available(_message->get_service(), _message->get_instance(), _message->get_interface_version())) {
+            VSOMEIP_WARNING << std::hex << std::setfill('0') << "rmc::send{_client=" << _client << " _message=" << std::setw(4)
+                            << _message->get_service() << "." << std::setw(4) << _message->get_method() << "." << std::setw(2)
+                            << static_cast<int>(_message->get_message_type()) << "." << std::setw(2)
+                            << static_cast<int>(_message->get_return_code()) << " _force=" << _force
+                            << "}: Service not available. instance=" << std::setw(4) << _message->get_instance() << " version="
+                            << std::setw(4) << _message->get_interface_version();
+            if (!_force) {
+                if (_completion) {
+                    _completion->begin();
+                    _completion->end();
+                }
+                return false;
+            }
+        }
+    }
+
+    if (_completion) {
+        _completion->begin();
+    }
+
+    std::shared_ptr<payload> its_payload = _message->get_payload();
+    const length_t its_app_length = its_payload ? its_payload->get_length() : 0;
+
+    auto its_header = std::make_shared<message_buffer_t>(VSOMEIP_FULL_HEADER_SIZE);
+    bithelper::write_uint16_be(_message->get_service(), its_header->data() + VSOMEIP_SERVICE_POS_MIN);
+    bithelper::write_uint16_be(_message->get_method(), its_header->data() + VSOMEIP_METHOD_POS_MIN);
+    const uint32_t its_total = static_cast<uint32_t>(VSOMEIP_FULL_HEADER_SIZE + its_app_length);
+    bithelper::write_uint32_be(its_total - 8U, its_header->data() + VSOMEIP_LENGTH_POS_MIN);
+    bithelper::write_uint16_be(_message->get_client(), its_header->data() + VSOMEIP_CLIENT_POS_MIN);
+    bithelper::write_uint16_be(_message->get_session(), its_header->data() + VSOMEIP_SESSION_POS_MIN);
+    (*its_header)[VSOMEIP_PROTOCOL_VERSION_POS] = _message->get_protocol_version();
+    (*its_header)[VSOMEIP_INTERFACE_VERSION_POS] = _message->get_interface_version();
+    (*its_header)[VSOMEIP_MESSAGE_TYPE_POS] = static_cast<byte_t>(_message->get_message_type());
+    (*its_header)[VSOMEIP_RETURN_CODE_POS] = static_cast<byte_t>(_message->get_return_code());
+
+    auto its_sequence = std::make_shared<buffer_sequence>();
+    its_sequence->append(std::move(its_header));
+    append_message_payload(*its_sequence, its_payload);
+
+    byte_t its_type_buf[VSOMEIP_FULL_HEADER_SIZE]{};
+    for (std::size_t i = 0; i < VSOMEIP_FULL_HEADER_SIZE; ++i) {
+        byte_t b = 0;
+        if (!its_sequence->read_byte(i, b)) {
+            break;
+        }
+        its_type_buf[i] = b;
+    }
+
+    const auto sec_client = get_sec_client();
+    const bool is_sent =
+            send_with_someip_sequence(_client, its_sequence, its_type_buf, VSOMEIP_FULL_HEADER_SIZE, _message->get_instance(),
+                                      _message->is_reliable(), get_client(), &sec_client, 0, false, _force, _completion);
+    if (_completion) {
+        _completion->end();
+    }
+    return is_sent;
+}
+
+bool routing_manager_client::send(client_t _client, message_buffer_ptr_t _frame, instance_t _instance, bool _reliable,
                                   client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _status_check,
                                   bool _sent_from_remote, bool _force) {
+
+    if (!_frame || _frame->empty()) {
+        return false;
+    }
+
+    auto its_sequence = sequence_from_frame(_frame);
+    return send_with_someip_sequence(_client, its_sequence, _frame->data(), static_cast<length_t>(_frame->size()), _instance, _reliable,
+                                     _bound_client, _sec_client, _status_check, _sent_from_remote, _force, nullptr);
+}
+
+bool routing_manager_client::send_with_someip_sequence(client_t _client, const buffer_sequence_ptr_t& _sequence, const byte_t* _hdr,
+                                                      length_t _hdr_size, instance_t _instance, bool _reliable, client_t _bound_client,
+                                                      const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote,
+                                                      bool _force, send_completion_state_ptr_t _completion) {
 
     (void)_bound_client;
     (void)_sec_client;
@@ -739,95 +831,89 @@ bool routing_manager_client::send(client_t _client, const byte_t* _data, length_
             return false;
         }
     }
+    if (!_sequence || _sequence->empty() || !_hdr || _hdr_size <= VSOMEIP_MESSAGE_TYPE_POS) {
+        return false;
+    }
+
     if (client_side_logging_) {
-        if (_size > VSOMEIP_MESSAGE_TYPE_POS) {
-            service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-            if (client_side_logging_filter_.empty() || (1 == client_side_logging_filter_.count(std::make_tuple(its_service, ANY_INSTANCE)))
-                || (1 == client_side_logging_filter_.count(std::make_tuple(its_service, _instance)))) {
-                method_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
-                session_t its_session = bithelper::read_uint16_be(&_data[VSOMEIP_SESSION_POS_MIN]);
-                client_t its_client = bithelper::read_uint16_be(&_data[VSOMEIP_CLIENT_POS_MIN]);
-                VSOMEIP_INFO << "routing_manager_client::send: (" << std::hex << std::setfill('0') << std::setw(4) << get_client() << "): ["
-                             << std::setw(4) << its_service << "." << std::setw(4) << _instance << "." << std::setw(4) << its_method << ":"
-                             << std::setw(4) << its_session << ":" << std::setw(4) << its_client << "] "
-                             << "type=" << std::hex << static_cast<std::uint32_t>(_data[VSOMEIP_MESSAGE_TYPE_POS]) << " thread=" << std::hex
-                             << std::this_thread::get_id();
-            }
-        } else {
-            VSOMEIP_ERROR << "routing_manager_client::send: (" << std::hex << std::setfill('0') << std::setw(4) << get_client()
-                          << "): message too short to log: " << std::dec << _size;
+        service_t its_service = bithelper::read_uint16_be(&_hdr[VSOMEIP_SERVICE_POS_MIN]);
+        if (client_side_logging_filter_.empty() || (1 == client_side_logging_filter_.count(std::make_tuple(its_service, ANY_INSTANCE)))
+            || (1 == client_side_logging_filter_.count(std::make_tuple(its_service, _instance)))) {
+            method_t its_method = bithelper::read_uint16_be(&_hdr[VSOMEIP_METHOD_POS_MIN]);
+            session_t its_session = bithelper::read_uint16_be(&_hdr[VSOMEIP_SESSION_POS_MIN]);
+            client_t its_client = bithelper::read_uint16_be(&_hdr[VSOMEIP_CLIENT_POS_MIN]);
+            VSOMEIP_INFO << "routing_manager_client::send: (" << std::hex << std::setfill('0') << std::setw(4) << get_client() << "): ["
+                         << std::setw(4) << its_service << "." << std::setw(4) << _instance << "." << std::setw(4) << its_method << ":"
+                         << std::setw(4) << its_session << ":" << std::setw(4) << its_client << "] "
+                         << "type=" << std::hex << static_cast<std::uint32_t>(_hdr[VSOMEIP_MESSAGE_TYPE_POS]) << " thread=" << std::hex
+                         << std::this_thread::get_id();
         }
     }
-    if (_size > VSOMEIP_MESSAGE_TYPE_POS) {
-        std::shared_ptr<endpoint> its_target;
-        if (utility::is_request(_data[VSOMEIP_MESSAGE_TYPE_POS])) {
-            // Request
-            service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-            client_t its_client = find_local_client(its_service, _instance);
-            if (its_client != VSOMEIP_ROUTING_CLIENT) {
-                if (is_client_known(its_client)) {
-                    its_target = ep_mgr_->find_or_create_local(its_client);
-                }
-            }
-        } else if (!utility::is_notification(_data[VSOMEIP_MESSAGE_TYPE_POS])) {
-            // Response
-            client_t its_client = bithelper::read_uint16_be(&_data[VSOMEIP_CLIENT_POS_MIN]);
-            if (its_client != VSOMEIP_ROUTING_CLIENT) {
-                if (is_client_known(its_client)) {
-                    its_target = ep_mgr_->find_or_create_local(its_client);
-                }
-            }
-        } else if (utility::is_notification(_data[VSOMEIP_MESSAGE_TYPE_POS]) && _client == VSOMEIP_ROUTING_CLIENT) {
-            // notify
-            has_remote_subscribers = send_local_notification(get_client(), _data, _size, _instance, _reliable, _status_check, _force);
-        } else if (utility::is_notification(_data[VSOMEIP_MESSAGE_TYPE_POS]) && _client != VSOMEIP_ROUTING_CLIENT) {
-            // notify_one
-            its_target = ep_mgr_->find_local(_client);
-            if (its_target) {
-                is_sent = send_local(its_target, get_client(), _data, _size, _instance, _reliable, protocol::id_e::SEND_ID, _status_check);
-                if (is_sent) {
-                    trace::header its_header;
-                    if (its_header.prepare(nullptr, true, _instance))
-                        tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
-                }
 
-                return is_sent;
+    std::shared_ptr<endpoint> its_target;
+    if (utility::is_request(_hdr[VSOMEIP_MESSAGE_TYPE_POS])) {
+        service_t its_service = bithelper::read_uint16_be(&_hdr[VSOMEIP_SERVICE_POS_MIN]);
+        client_t its_client = find_local_client(its_service, _instance);
+        if (its_client != VSOMEIP_ROUTING_CLIENT) {
+            if (is_client_known(its_client)) {
+                its_target = ep_mgr_->find_or_create_local(its_client);
             }
         }
-        // If no direct endpoint could be found
-        // or for notifications ~> route to routing_manager_stub
-        bool message_to_stub(false);
-        if (!its_target) {
-            std::scoped_lock its_sender_lock{sender_mutex_};
-            if (sender_) {
-                its_target = sender_;
-                message_to_stub = true;
-            } else {
-                return false;
+    } else if (!utility::is_notification(_hdr[VSOMEIP_MESSAGE_TYPE_POS])) {
+        client_t its_client = bithelper::read_uint16_be(&_hdr[VSOMEIP_CLIENT_POS_MIN]);
+        if (its_client != VSOMEIP_ROUTING_CLIENT) {
+            if (is_client_known(its_client)) {
+                its_target = ep_mgr_->find_or_create_local(its_client);
             }
         }
-
-        bool send(true);
-        protocol::id_e its_command(protocol::id_e::SEND_ID);
-
-        if (utility::is_notification(_data[VSOMEIP_MESSAGE_TYPE_POS])) {
-            if (_client != VSOMEIP_ROUTING_CLIENT) {
-                its_command = protocol::id_e::NOTIFY_ONE_ID;
-            } else {
-                its_command = protocol::id_e::NOTIFY_ID;
-                // Do we need to deliver a notification to the routing manager?
-                // Only for services which already have remote clients subscribed to
-                send = has_remote_subscribers;
-            }
-        }
-        if (send) {
-            auto its_client{its_command == protocol::id_e::NOTIFY_ONE_ID ? _client : get_client()};
-            is_sent = send_local(its_target, its_client, _data, _size, _instance, _reliable, its_command, _status_check);
-            if (is_sent && !utility::is_notification(VSOMEIP_MESSAGE_TYPE_POS) && !message_to_stub) {
+    } else if (utility::is_notification(_hdr[VSOMEIP_MESSAGE_TYPE_POS]) && _client == VSOMEIP_ROUTING_CLIENT) {
+        has_remote_subscribers =
+                send_local_notification(get_client(), _sequence, _instance, _reliable, _status_check, _force, _completion);
+    } else if (utility::is_notification(_hdr[VSOMEIP_MESSAGE_TYPE_POS]) && _client != VSOMEIP_ROUTING_CLIENT) {
+        its_target = ep_mgr_->find_local(_client);
+        if (its_target) {
+            is_sent = send_local(its_target, get_client(), _sequence, _instance, _reliable, protocol::id_e::SEND_ID, _status_check,
+                                 _completion);
+            if (is_sent) {
+                auto its_flat = _sequence->flatten();
                 trace::header its_header;
                 if (its_header.prepare(nullptr, true, _instance))
-                    tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+                    tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_flat->data(), static_cast<uint32_t>(its_flat->size()));
             }
+            return is_sent;
+        }
+    }
+
+    bool message_to_stub(false);
+    if (!its_target) {
+        std::scoped_lock its_sender_lock{sender_mutex_};
+        if (sender_) {
+            its_target = sender_;
+            message_to_stub = true;
+        } else {
+            return false;
+        }
+    }
+
+    bool send(true);
+    protocol::id_e its_command(protocol::id_e::SEND_ID);
+
+    if (utility::is_notification(_hdr[VSOMEIP_MESSAGE_TYPE_POS])) {
+        if (_client != VSOMEIP_ROUTING_CLIENT) {
+            its_command = protocol::id_e::NOTIFY_ONE_ID;
+        } else {
+            its_command = protocol::id_e::NOTIFY_ID;
+            send = has_remote_subscribers;
+        }
+    }
+    if (send) {
+        auto its_client{its_command == protocol::id_e::NOTIFY_ONE_ID ? _client : get_client()};
+        is_sent = send_local(its_target, its_client, _sequence, _instance, _reliable, its_command, _status_check, _completion);
+        if (is_sent && !utility::is_notification(_hdr[VSOMEIP_MESSAGE_TYPE_POS]) && !message_to_stub) {
+            auto its_flat = _sequence->flatten();
+            trace::header its_header;
+            if (its_header.prepare(nullptr, true, _instance))
+                tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_flat->data(), static_cast<uint32_t>(its_flat->size()));
         }
     }
     return is_sent;
@@ -839,17 +925,6 @@ bool routing_manager_client::send_to(const client_t _client, const std::shared_p
     (void)_client;
     (void)_target;
     (void)_message;
-
-    return false;
-}
-
-bool routing_manager_client::send_to(const std::shared_ptr<endpoint_definition>& _target, const byte_t* _data, uint32_t _size,
-                                     instance_t _instance) {
-
-    (void)_target;
-    (void)_data;
-    (void)_size;
-    (void)_instance;
 
     return false;
 }
@@ -2238,8 +2313,10 @@ void routing_manager_client::notify_remote_initially(service_t _service, instanc
                     {
                         std::scoped_lock its_sender_lock{sender_mutex_};
                         if (sender_) {
-                            send_local(sender_, VSOMEIP_ROUTING_CLIENT, its_serializer->get_data(), its_serializer->get_size(), _instance,
-                                       false, protocol::id_e::NOTIFY_ID, 0);
+                            auto its_frame = std::make_shared<message_buffer_t>(its_serializer->get_data(),
+                                                                                its_serializer->get_data() + its_serializer->get_size());
+                            send_local(sender_, VSOMEIP_ROUTING_CLIENT, sequence_from_frame(its_frame), _instance, false,
+                                       protocol::id_e::NOTIFY_ID, 0);
                         }
                     }
                     its_serializer->reset();

@@ -20,6 +20,8 @@
 #include <vsomeip/function_types.hpp>
 #include <vsomeip/payload.hpp>
 
+#include "../../endpoints/include/buffer.hpp"
+
 namespace vsomeip_v3 {
 
 class endpoint;
@@ -48,17 +50,18 @@ public:
 
     std::shared_ptr<payload> get_payload() const;
 
-    void set_payload(const std::shared_ptr<payload>& _payload, const client_t _client, bool _force);
+    void set_payload(const std::shared_ptr<payload>& _payload, const client_t _client, bool _force,
+                     send_completion_state_ptr_t _completion = nullptr);
 
     void set_payload(const std::shared_ptr<payload>& _payload, const client_t _client, const std::shared_ptr<endpoint_definition>& _target,
-                     bool _force);
+                     bool _force, send_completion_state_ptr_t _completion = nullptr);
 
     bool prepare_update_payload(const std::shared_ptr<payload>& _payload, bool _force);
     void update_payload();
 
     bool set_payload_notify_pending(const std::shared_ptr<payload>& _payload);
 
-    void set_payload(const std::shared_ptr<payload>& _payload, bool _force);
+    void set_payload(const std::shared_ptr<payload>& _payload, bool _force, send_completion_state_ptr_t _completion = nullptr);
     void unset_payload(bool _force = false);
 
     event_type_e get_type() const;
@@ -119,16 +122,16 @@ public:
 
 private:
     void update_cbk(boost::system::error_code const& _error);
-    void notify(bool _force);
-    void notify(client_t _client, const std::shared_ptr<endpoint_definition>& _target);
+    void notify(bool _force, send_completion_state_ptr_t _completion = nullptr);
 
     void start_cycle();
     void stop_cycle();
 
     bool has_changed(const std::shared_ptr<payload>& _lhs, const std::shared_ptr<payload>& _rhs) const;
 
-    void notify_one_unlocked(client_t _client, bool _force);
-    void notify_one_unlocked(client_t _client, const std::shared_ptr<endpoint_definition>& _target);
+    void notify_one_unlocked(client_t _client, bool _force, send_completion_state_ptr_t _completion = nullptr);
+    void notify_one_unlocked(client_t _client, const std::shared_ptr<endpoint_definition>& _target,
+                             send_completion_state_ptr_t _completion = nullptr);
 
     bool prepare_update_payload_unlocked(const std::shared_ptr<payload>& _payload, bool _force);
     void update_payload_unlocked();

@@ -60,8 +60,10 @@ void memory_test_client::on_message(const std::shared_ptr<vsomeip::message>& mes
         its_message->set_method(message_->get_method());
         its_message->set_interface_version(message_->get_interface_version());
         its_message->set_message_type(vsomeip::message_type_e::MT_REQUEST_NO_RETURN);
+        // Echo shares the received payload; completion ⇒ pin without snapshot.
+        // The payload stays immutable here.
         its_message->set_payload(message_->get_payload());
-        _app->send(its_message);
+        _app->send(its_message, [](bool) {});
         std::lock_guard<std::mutex> lk(event_counter_mutex);
         received_messages_counter++;
         sec = std::chrono::system_clock::now();

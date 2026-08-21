@@ -6,6 +6,19 @@ source "${BASH_SOURCE[0]%/*}"/shlib/results.shlib
 ip_master=$(dig +short master)
 ip_slave=$(dig +short slave)
 
+# AddressSanitizer must be the first loaded DSO (vsomeip dlopens SD/config plugins).
+# SSH SendEnv/AcceptEnv forwards this to the slave for remote starters.
+if [[ ${SANITIZER_TYPE-} == "ADDRESS" ]]; then
+	asan_lib="$("$CXX" -print-file-name=libasan.so)"
+	if [[ ! -e $asan_lib ]]; then
+		echo "ERROR: SANITIZER_TYPE=ADDRESS but libasan.so was not found via $CXX" >&2
+		exit 1
+	fi
+	export LD_PRELOAD="$asan_lib${LD_PRELOAD:+:$LD_PRELOAD}"
+	export ASAN_OPTIONS="${ASAN_OPTIONS:-halt_on_error=1:detect_leaks=0:color=always}"
+	echo "ADDRESS sanitizer: LD_PRELOAD=$LD_PRELOAD ASAN_OPTIONS=$ASAN_OPTIONS"
+fi
+
 # Stress label extraction
 # 1. We convert the incoming JSON-encoded array of labels into an object by
 #    using regex capture to extract the key/value from the format
@@ -17,14 +30,19 @@ ip_slave=$(dig +short slave)
 #       conversion fails
 #    c) Resulting array is bumped with an extra 1 to ensure at least 2 elements
 #    d) Slice array to extract first 2 elements
-stress_labels_json=$(jq 'map(capture("(?<key>[^:\\s]+)\\s*:\\s*(?<value>[^:\\s]+)")) | from_entries' <<< "$STRESS_LABELS")
-stress_regex=$(jq -r '.["ctest-include"] // ""' <<< "$stress_labels_json")
-mapfile -t stress_times < <(jq -r '.["ctest-stress"] // "1-1" | split("-") | map(try tonumber catch 1) + [1] | .[:2][]' <<< "$stress_labels_json")
+stress_labels_json=$(jq 'map(capture("(?<key>[^:\\s]+)\\s*:\\s*(?<value>[^:\\s]+)")) | from_entries' <<<"$STRESS_LABELS")
+stress_regex=$(jq -r '.["ctest-include"] // ""' <<<"$stress_labels_json")
+mapfile -t stress_times < <(jq -r '.["ctest-stress"] // "1-1" | split("-") | map(try tonumber catch 1) + [1] | .[:2][]' <<<"$stress_labels_json")
 
 (
 	set -x
+	# Explicitly clear other sanitizers so switching SANITIZER_TYPE does not
+	# accumulate -fsanitize flags from a previous CMake cache.
 	cmake --preset ci-network-tests \
-		-D "ENABLE_${SANITIZER_TYPE}_SANITIZER=Y" \
+		-D ENABLE_ADDRESS_SANITIZER="$([[ ${SANITIZER_TYPE-} == ADDRESS ]] && echo Y || echo N)" \
+		-D ENABLE_LEAK_SANITIZER="$([[ ${SANITIZER_TYPE-} == LEAK ]] && echo Y || echo N)" \
+		-D ENABLE_THREAD_SANITIZER="$([[ ${SANITIZER_TYPE-} == THREAD ]] && echo Y || echo N)" \
+		-D ENABLE_UNDEFINED_SANITIZER="$([[ ${SANITIZER_TYPE-} == UNDEFINED ]] && echo Y || echo N)" \
 		-D "TEST_IP_MASTER=$ip_master" \
 		-D "TEST_IP_SLAVE=$ip_slave" \
 		-D "VALGRIND_LOGS_DIR=/home/logs/valgrind/$VALGRIND_TYPE" \
@@ -39,28 +57,22 @@ declare -i valgrind_errors=0
 mkdir -p /home/logs/{cores,coverage,{,failed-}junit,pcap,"valgrind/$VALGRIND_TYPE"}
 gen-result-file "$tests_result_file" "/home/source/.tests-whitelist"
 
-for ((n = 0; n < stress_times[0]; n++))
-do
-	for test in $(ctest --preset ci-network-tests --show-only=json-v1 ${stress_regex:+--tests-regex "$stress_regex"} | jq -r '.tests[].name')
-	do
-		for ((m = 0; m < stress_times[1]; m++))
-		do
-			if is-timed-out
-			then
+for ((n = 0; n < stress_times[0]; n++)); do
+	for test in $(ctest --preset ci-network-tests --show-only=json-v1 ${stress_regex:+--tests-regex "$stress_regex"} | jq -r '.tests[].name'); do
+		for ((m = 0; m < stress_times[1]; m++)); do
+			if is-timed-out; then
 				break
 			fi
 
 			run-both rm -f /tmp/vsomeip*
 			tcpdump -U -i eth0 -w /home/logs/pcap/"$test".pcap &
 
-			if ! ctest --preset ci-network-tests --output-junit /home/logs/junit/"$test".xml --tests-regex "^$test$" --test-output-size-passed 1073741824 --test-output-size-failed 1073741824
-			then
+			if ! ctest --preset ci-network-tests --output-junit /home/logs/junit/"$test".xml --tests-regex "^$test$" --test-output-size-passed 1073741824 --test-output-size-failed 1073741824; then
 				update-result-file "$tests_result_file" "$test" 1
 				cp /home/logs/{junit/"$test".xml,failed-junit/}
 			else
 				valgrind_errors=$(valgrind-errors "/home/logs/valgrind/$VALGRIND_TYPE" "$test")
-				if ((valgrind_errors > 0))
-				then
+				if ((valgrind_errors > 0)); then
 					update-result-file "$tests_result_file" "$test" "$valgrind_errors" "$VALGRIND_TYPE"
 					cp /home/logs/{junit/"$test".xml,failed-junit/}
 				else
@@ -69,7 +81,10 @@ do
 			fi
 
 			kill %1
-			run-both kill -KILL -1 || :
+			# Do not inherit ASan into kill(1): with LD_PRELOAD=libasan,
+			# `kill -KILL -1` maps a huge VA and can hang, stalling the suite
+			# after the first test.
+			env -u LD_PRELOAD -u ASAN_OPTIONS run-both kill -KILL -1 || :
 		done
 	done
 done
@@ -78,16 +93,14 @@ done
 	cd /home/logs
 	tar -acvf junit.tgz --transform=s/^junit/network-tests/ junit/*.xml
 	shopt -s nullglob
-	if [[ "$(echo failed-junit/*.xml)" ]]
-	then
+	if [[ "$(echo failed-junit/*.xml)" ]]; then
 		tar -acvf failed-junit.tgz --transform=s/^failed-junit/network-tests/ failed-junit/*.xml
 	fi
 )
 
 gen-core-backtraces /home/logs/cores
 
-if [ "$ENABLE_COVERAGE" != False ]
-then
+if [ "$ENABLE_COVERAGE" != False ]; then
 	# Temporarily ignore parse errors to unblock ci
 	run-both gcovr --gcov-executable "$GCOV" --gcov-ignore-parse-errors=suspicious_hits.warn --json /home/logs/coverage/@name@.json --root /home/source /home/build
 	run-both lcov --base-directory /home/source --capture --directory /home/build --gcov-tool "$GCOV" --output-file /home/logs/coverage/@name@.info
@@ -100,8 +113,7 @@ fi
 run-slave kill 1 || :
 
 print-results "$tests_result_file"
-if is-timed-out
-then
+if is-timed-out; then
 	echo 'Global timeout was reached!'
 	echo 'See above which test(s) were at fault.'
 	exit 255

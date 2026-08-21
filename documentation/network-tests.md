@@ -39,10 +39,33 @@ This page will guide you to accomplish that goal.
    export SANITIZER_TYPE=<ADDRESS | LEAK | THREAD | UNDEFINED>
    ```
 
-   **Example**
+   **Example (LeakSanitizer — default recommendation for a quick local pass)**
 
    ```bash
    export SANITIZER_TYPE=LEAK
+   export VALGRIND_TYPE=''
+   ```
+
+   **Example (AddressSanitizer — preferred for memory-safety / buffer work)**
+
+   ```bash
+   export SANITIZER_TYPE=ADDRESS
+   export VALGRIND_TYPE=''
+   # Wipe the network-test build when switching sanitizer type so -fsanitize
+   # flags do not accumulate from a previous CMake cache.
+   rm -rf build-network-tests
+   ```
+
+   The compose harness preloads `libasan.so` when `SANITIZER_TYPE=ADDRESS`
+   (required because vsomeip `dlopen`s plugins; without that you get
+   `ASan runtime does not come first in initial library list`). Between-test
+   cleanup runs `kill` with `LD_PRELOAD` cleared so ASan does not hang the
+   suite after the first test.
+
+   **Unit tests (Bazel)**
+
+   ```bash
+   bazel test --config=asan //test/unit_tests/...
    ```
 
    **Syntax valgrinds**

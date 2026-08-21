@@ -148,7 +148,7 @@ void tcp_server_endpoint_impl::stop(bool /*_due_to_error*/) {
     VSOMEIP_INFO << instance_name_ << __func__ << ": done";
 }
 
-bool tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool tcp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) {
     std::lock_guard<std::mutex> its_lock(mutex_);
     endpoint_type its_target(_target->get_address(), _target->get_port());
     return send_intern(its_target, _sequence);
@@ -161,7 +161,7 @@ bool tcp_server_endpoint_impl::send_error(const std::shared_ptr<endpoint_definit
     auto& its_data = its_target_iterator->second;
 
     if (check_queue_limit(_data, _size, its_data) && check_message_size(_size)) {
-        its_data.queue_.emplace_back(std::make_shared<send_buffer_sequence>(_data, _size), 0);
+        its_data.queue_.emplace_back(std::make_shared<buffer_sequence>(_data, _size), 0);
         its_data.queue_size_ += _size;
 
         if (!its_data.is_sending_) { // no writing in progress
@@ -511,7 +511,7 @@ void tcp_server_endpoint_impl::connection::send_queued(const target_data_iterato
         VSOMEIP_ERROR << instance_name_ << __func__ << ": couldn't lock server_";
         return;
     }
-    send_buffer_sequence_ptr_t its_sequence = _it->second.queue_.front().first;
+    buffer_sequence_ptr_t its_sequence = _it->second.queue_.front().first;
     service_t its_service(0);
     method_t its_method(0);
     client_t its_client(0);
@@ -543,7 +543,7 @@ void tcp_server_endpoint_impl::connection::send_queued(const target_data_iterato
     }
 }
 
-bool tcp_server_endpoint_impl::connection::send_magic_cookie(send_buffer_sequence_ptr_t& _sequence) {
+bool tcp_server_endpoint_impl::connection::send_magic_cookie(buffer_sequence_ptr_t& _sequence) {
     if (max_message_size_ == MESSAGE_SIZE_UNLIMITED
         || max_message_size_ - _sequence->size() >= VSOMEIP_SOMEIP_HEADER_SIZE + VSOMEIP_SOMEIP_MAGIC_COOKIE_SIZE) {
         auto cookie = std::make_shared<message_buffer_t>(SERVICE_COOKIE, SERVICE_COOKIE + sizeof(SERVICE_COOKIE));

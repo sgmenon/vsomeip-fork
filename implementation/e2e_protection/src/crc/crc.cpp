@@ -115,7 +115,7 @@ const uint32_t e2e_crc::lookup_table_profile_04_[256] = {
  */
 uint16_t e2e_crc::calculate_profile_05(buffer_view _buffer_view, const uint16_t _start_value) {
     const uint8_t* buffer = _buffer_view.begin();
-    uint32_t buffer_length = (uint32_t)_buffer_view.data_length();
+    uint32_t buffer_length = static_cast<uint32_t>(_buffer_view.size());
     uint16_t crc = _start_value;
 
     /* Process all data (byte wise) */

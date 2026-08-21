@@ -32,7 +32,7 @@ public:
     /**
      * @brief Callback parameterized for write operations of local communication.
      */
-    void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const send_buffer_sequence_ptr_t& _sent_msg) override;
+    void send_cbk(boost::system::error_code const& _error, std::size_t _bytes, const buffer_sequence_ptr_t& _sent_msg) override;
 
     /**
      * @brief Manages the error handling of both R/W operations and forwards to routing manager the vsomeip protocol layer decisions.
@@ -50,7 +50,7 @@ public:
     virtual void print_status() = 0;
 
 protected:
-    virtual void send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) = 0;
+    virtual void send_queued(std::pair<buffer_sequence_ptr_t, uint32_t>& _entry) = 0;
     virtual void get_configured_times_from_endpoint(service_t _service, method_t _method, std::chrono::nanoseconds* _debouncing,
                                                     std::chrono::nanoseconds* _maximum_retention) const = 0;
 

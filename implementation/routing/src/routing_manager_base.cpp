@@ -4,6 +4,8 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 #include <iomanip>
+#include <cstring>
+#include <limits>
 
 #include <vsomeip/runtime.hpp>
 #include <vsomeip/internal/logger.hpp>
@@ -11,6 +13,7 @@
 #include "../include/routing_manager_base.hpp"
 #include "../../configuration/include/debounce_filter_impl.hpp"
 #include "../../protocol/include/send_command.hpp"
+#include "../../endpoints/include/buffer.hpp"
 #include "../../security/include/policy_manager_impl.hpp"
 #include "../../security/include/security.hpp"
 #include "../../tracing/include/connector_impl.hpp"
@@ -725,20 +728,24 @@ void routing_manager_base::unsubscribe(client_t _client, const vsomeip_sec_clien
     }
 }
 
-void routing_manager_base::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                  bool _force) {
+void routing_manager_base::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force,
+                                  send_completion_state_ptr_t _completion) {
 
     std::shared_ptr<event> its_event = find_event(_service, _instance, _event);
     if (its_event) {
-        its_event->set_payload(_payload, _force);
+        its_event->set_payload(_payload, _force, std::move(_completion));
     } else {
         VSOMEIP_WARNING << "Attempt to update the undefined event/field [" << std::hex << _service << "." << _instance << "." << _event
                         << "]";
+        if (_completion) {
+            _completion->begin();
+            _completion->end();
+        }
     }
 }
 
 void routing_manager_base::notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
-                                      client_t _client, bool _force) {
+                                      client_t _client, bool _force, send_completion_state_ptr_t _completion) {
     std::shared_ptr<event> its_event = find_event(_service, _instance, _event);
     if (its_event) {
         // Event is valid for service/instance
@@ -762,12 +769,17 @@ void routing_manager_base::notify_one(service_t _service, instance_t _instance, 
         }
         if (found_eventgroup) {
             if (already_subscribed) {
-                its_event->set_payload(_payload, _client, _force);
+                its_event->set_payload(_payload, _client, _force, std::move(_completion));
+                return;
             }
         }
     } else {
         VSOMEIP_WARNING << "Attempt to update the undefined event/field [" << std::hex << _service << "." << _instance << "." << _event
                         << "]";
+    }
+    if (_completion) {
+        _completion->begin();
+        _completion->end();
     }
 }
 
@@ -839,7 +851,11 @@ void routing_manager_base::notify_one_current_value(client_t _client, service_t 
     }
 }
 
-bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _message, bool _force) {
+bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _message, bool _force,
+                                send_completion_state_ptr_t _completion) {
+    if (_completion) {
+        _completion->begin();
+    }
     bool is_sent(false);
     if (utility::is_request(_message->get_message_type())) {
         _message->set_client(_client);
@@ -851,6 +867,9 @@ bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _mess
                             << "}: Service not available. instance=" << std::setw(4) << _message->get_instance()
                             << " version=" << std::setw(4) << _message->get_interface_version();
             if (!_force) {
+                if (_completion) {
+                    _completion->end();
+                }
                 return is_sent;
             }
         }
@@ -859,12 +878,18 @@ bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _mess
     std::shared_ptr<serializer> its_serializer(get_serializer());
     if (its_serializer->serialize(_message.get())) {
         auto const sec_client = get_sec_client();
-        is_sent = send(_client, its_serializer->get_data(), its_serializer->get_size(), _message->get_instance(), _message->is_reliable(),
-                       get_client(), &sec_client, 0, false, _force);
+        auto its_frame = std::make_shared<message_buffer_t>(its_serializer->get_data(),
+                                                            its_serializer->get_data() + its_serializer->get_size());
+        is_sent = send(_client, std::move(its_frame), _message->get_instance(), _message->is_reliable(), get_client(), &sec_client, 0,
+                       false, _force);
         its_serializer->reset();
         put_serializer(its_serializer);
     } else {
         VSOMEIP_ERROR << "Failed to serialize message. Check message size!";
+    }
+    // Serializer fallback has no sequence completion hooks; treat queue acceptance as done.
+    if (_completion) {
+        _completion->end();
     }
     return is_sent;
 }
@@ -1156,13 +1181,21 @@ void routing_manager_base::remove_eventgroup_info(service_t _service, instance_t
     }
 }
 
-bool routing_manager_base::send_local_notification(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance,
-                                                   bool _reliable, uint8_t _status_check, bool _force) {
+bool routing_manager_base::send_local_notification(client_t _client, const buffer_sequence_ptr_t& _sequence, instance_t _instance,
+                                                   bool _reliable, uint8_t _status_check, bool _force,
+                                                   send_completion_state_ptr_t _completion) {
     bool has_local(false);
     (void)_client;
     bool has_remote(false);
-    service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
-    method_t its_method = bithelper::read_uint16_be(&_data[VSOMEIP_METHOD_POS_MIN]);
+    if (!_sequence || _sequence->empty()) {
+        return false;
+    }
+
+    service_t its_service = 0;
+    method_t its_method = 0;
+    if (!_sequence->read_uint16_be(VSOMEIP_SERVICE_POS_MIN, its_service) || !_sequence->read_uint16_be(VSOMEIP_METHOD_POS_MIN, its_method)) {
+        return false;
+    }
 
     std::shared_ptr<event> its_event = find_event(its_service, _instance, its_method);
     if (its_event && !its_event->is_shadow()) {
@@ -1177,42 +1210,82 @@ bool routing_manager_base::send_local_notification(client_t _client, const byte_
 
             std::shared_ptr<endpoint> its_local_target = ep_mgr_->find_local(its_client);
             if (its_local_target) {
-                send_local(its_local_target, its_client, _data, _size, _instance, _reliable, protocol::id_e::SEND_ID, _status_check);
+                send_local(its_local_target, its_client, _sequence, _instance, _reliable, protocol::id_e::SEND_ID, _status_check,
+                           _completion);
             }
         }
     }
 
     // Trace the message if a local client but will _not_ be forwarded to the routing manager
     if (has_local && !has_remote) {
+        auto its_flat = _sequence->flatten();
         trace::header its_header;
         if (its_header.prepare(nullptr, true, _instance))
-            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, _data, _size);
+            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_flat->data(), static_cast<uint32_t>(its_flat->size()));
     }
 
     return has_remote;
 }
 
-bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const byte_t* _data, uint32_t _size,
-                                      instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check) const {
+buffer_sequence_ptr_t routing_manager_base::sequence_from_frame(const message_buffer_ptr_t& _frame) {
+    auto its_sequence = std::make_shared<buffer_sequence>();
+    if (!_frame || _frame->empty()) {
+        return its_sequence;
+    }
+    if (_frame->size() > VSOMEIP_FULL_HEADER_SIZE) {
+        its_sequence->append_buffer_slice(_frame, 0, VSOMEIP_FULL_HEADER_SIZE);
+        its_sequence->append_buffer_slice(_frame, VSOMEIP_FULL_HEADER_SIZE, _frame->size() - VSOMEIP_FULL_HEADER_SIZE);
+    } else {
+        its_sequence->append(_frame);
+    }
+    return its_sequence;
+}
 
-    bool has_sent(false);
+bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const buffer_sequence_ptr_t& _someip,
+                                      instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check,
+                                      send_completion_state_ptr_t _completion) const {
 
-    protocol::send_command its_command(_command);
-    its_command.set_client(get_client());
-    its_command.set_instance(_instance);
-    its_command.set_reliable(_reliable);
-    its_command.set_status(_status_check);
-    its_command.set_target(_client);
-    its_command.set_message(std::vector<byte_t>(_data, _data + _size));
-
-    std::vector<byte_t> its_buffer;
-    protocol::error_e its_error;
-    its_command.serialize(its_buffer, its_error);
-    if (its_error == protocol::error_e::ERROR_OK) {
-        has_sent = _target->send(&its_buffer[0], uint32_t(its_buffer.size()));
+    if (!_target || !_someip || _someip->empty()) {
+        return false;
     }
 
-    return has_sent;
+    const std::size_t its_someip_size = _someip->size();
+    const std::size_t its_payload_size = sizeof(instance_t) + sizeof(bool) + sizeof(uint8_t) + sizeof(client_t) + its_someip_size;
+    if (its_payload_size > std::numeric_limits<protocol::command_size_t>::max()) {
+        return false;
+    }
+
+    // [id|version|client|size|instance|reliable|status|target] then SOME/IP segments (scatter).
+    auto its_meta = std::make_shared<message_buffer_t>(protocol::SEND_COMMAND_HEADER_SIZE);
+    (*its_meta)[0] = static_cast<byte_t>(_command);
+    protocol::version_t its_version = protocol::MAX_SUPPORTED_VERSION;
+    std::memcpy(its_meta->data() + protocol::COMMAND_POSITION_VERSION, &its_version, sizeof(its_version));
+    const client_t its_sender = get_client();
+    std::memcpy(its_meta->data() + protocol::COMMAND_POSITION_CLIENT, &its_sender, sizeof(its_sender));
+    const protocol::command_size_t its_cmd_size = static_cast<protocol::command_size_t>(its_payload_size);
+    std::memcpy(its_meta->data() + protocol::COMMAND_POSITION_SIZE, &its_cmd_size, sizeof(its_cmd_size));
+
+    std::size_t its_offset = protocol::COMMAND_POSITION_PAYLOAD;
+    std::memcpy(its_meta->data() + its_offset, &_instance, sizeof(_instance));
+    its_offset += sizeof(_instance);
+    (*its_meta)[its_offset] = static_cast<byte_t>(_reliable);
+    its_offset += sizeof(bool);
+    (*its_meta)[its_offset] = _status_check;
+    its_offset += sizeof(uint8_t);
+    std::memcpy(its_meta->data() + its_offset, &_client, sizeof(_client));
+
+    auto its_ipc = std::make_shared<buffer_sequence>();
+    its_ipc->append(std::move(its_meta));
+    its_ipc->append_sequence(*_someip);
+    its_ipc->clear_completions();
+    if (_completion) {
+        its_ipc->attach_completion(_completion);
+    }
+    const bool queued = _target->send(its_ipc);
+    if (queued && _completion) {
+        _completion->add_pending(1);
+    }
+    return queued;
 }
 
 bool routing_manager_base::insert_subscription(service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event,

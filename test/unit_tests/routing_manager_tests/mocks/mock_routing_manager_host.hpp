@@ -32,7 +32,7 @@ public:
                 (override));
     MOCK_METHOD(void, on_subscription_status,
                 (service_t _service, instance_t _instance, eventgroup_t _eventgroup, event_t _event, uint16_t _error), (override));
-    MOCK_METHOD(void, send, (std::shared_ptr<message> _message), (override));
+    MOCK_METHOD(void, send, (std::shared_ptr<message> _message, send_completion_handler_t _completion), (override));
     MOCK_METHOD(void, on_offered_services_info, ((std::vector<std::pair<vsomeip_v3::service_t, vsomeip_v3::instance_t>> & _services)),
                 (override));
     MOCK_METHOD(bool, is_routing, (), (const, override));

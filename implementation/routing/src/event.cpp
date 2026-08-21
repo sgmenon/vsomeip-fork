@@ -128,7 +128,7 @@ void event::update_payload_unlocked() {
     current_->set_payload(update_->get_payload());
 }
 
-void event::set_payload(const std::shared_ptr<payload>& _payload, bool _force) {
+void event::set_payload(const std::shared_ptr<payload>& _payload, bool _force, send_completion_state_ptr_t _completion) {
 
     std::lock_guard<std::mutex> its_lock(mutex_);
     if (is_provided_) {
@@ -137,7 +137,8 @@ void event::set_payload(const std::shared_ptr<payload>& _payload, bool _force) {
                 if (change_resets_cycle_)
                     stop_cycle();
 
-                notify(_force);
+                notify(_force, _completion);
+                _completion.reset();
 
                 if (change_resets_cycle_)
                     start_cycle();
@@ -150,15 +151,21 @@ void event::set_payload(const std::shared_ptr<payload>& _payload, bool _force) {
                      << current_->get_service() << "." << current_->get_instance() << "." << current_->get_method()
                      << "]. It isn't provided";
     }
+    if (_completion) {
+        _completion->begin();
+        _completion->end();
+    }
 }
 
-void event::set_payload(const std::shared_ptr<payload>& _payload, client_t _client, bool _force) {
+void event::set_payload(const std::shared_ptr<payload>& _payload, client_t _client, bool _force,
+                        send_completion_state_ptr_t _completion) {
 
     std::lock_guard<std::mutex> its_lock(mutex_);
     if (is_provided_) {
         if (prepare_update_payload_unlocked(_payload, _force)) {
             if (is_updating_on_change_) {
-                notify_one_unlocked(_client, _force);
+                notify_one_unlocked(_client, _force, _completion);
+                _completion.reset();
                 update_payload_unlocked();
             }
         }
@@ -167,16 +174,21 @@ void event::set_payload(const std::shared_ptr<payload>& _payload, client_t _clie
                      << current_->get_service() << "." << current_->get_instance() << "." << current_->get_method()
                      << "]. It isn't provided";
     }
+    if (_completion) {
+        _completion->begin();
+        _completion->end();
+    }
 }
 
 void event::set_payload(const std::shared_ptr<payload>& _payload, const client_t _client,
-                        const std::shared_ptr<endpoint_definition>& _target, bool _force) {
+                        const std::shared_ptr<endpoint_definition>& _target, bool _force, send_completion_state_ptr_t _completion) {
 
     std::lock_guard<std::mutex> its_lock(mutex_);
     if (is_provided_) {
         if (prepare_update_payload_unlocked(_payload, _force)) {
             if (is_updating_on_change_) {
-                notify_one_unlocked(_client, _target);
+                notify_one_unlocked(_client, _target, _completion);
+                _completion.reset();
                 update_payload_unlocked();
             }
         }
@@ -184,6 +196,10 @@ void event::set_payload(const std::shared_ptr<payload>& _payload, const client_t
         VSOMEIP_INFO << __func__ << ":" << __LINE__ << " Cannot set payload for event [" << std::hex << std::setfill('0') << std::setw(4)
                      << current_->get_service() << "." << current_->get_instance() << "." << current_->get_method()
                      << "]. It isn't provided";
+    }
+    if (_completion) {
+        _completion->begin();
+        _completion->end();
     }
 }
 
@@ -305,14 +321,19 @@ void event::update_cbk(boost::system::error_code const& _error) {
     }
 }
 
-void event::notify(bool _force) {
+void event::notify(bool _force, send_completion_state_ptr_t _completion) {
 
     if (is_set_) {
         set_session();
-        routing_->send(VSOMEIP_ROUTING_CLIENT, update_, _force);
+        // Event already owns the payload (snapshotted at the application boundary); pin it.
+        routing_->send(VSOMEIP_ROUTING_CLIENT, update_, _force, std::move(_completion));
     } else {
         VSOMEIP_INFO << __func__ << ": Notifying " << std::hex << std::setfill('0') << std::setw(4) << get_service() << "."
                      << get_instance() << "." << get_event() << " failed. Event payload not (yet) set!";
+        if (_completion) {
+            _completion->begin();
+            _completion->end();
+        }
     }
 }
 
@@ -320,45 +341,63 @@ void event::notify_one(client_t _client, const std::shared_ptr<endpoint_definiti
 
     if (_target) {
         std::lock_guard<std::mutex> its_lock(mutex_);
-        notify_one_unlocked(_client, _target);
+        notify_one_unlocked(_client, _target, nullptr);
     } else {
         VSOMEIP_WARNING << __func__ << ": Notifying " << std::hex << std::setfill('0') << std::setw(4) << get_service() << "."
                         << get_instance() << "." << get_event() << " failed. Target undefined";
     }
 }
 
-void event::notify_one_unlocked(client_t _client, const std::shared_ptr<endpoint_definition>& _target) {
+void event::notify_one_unlocked(client_t _client, const std::shared_ptr<endpoint_definition>& _target,
+                                send_completion_state_ptr_t _completion) {
 
     if (_target) {
         if (is_set_) {
             set_session();
             routing_->send_to(_client, _target, update_);
+            if (_completion) {
+                // send_to has no completion hook yet; treat as queued for local sync semantics.
+                _completion->begin();
+                _completion->end();
+            }
         } else {
             VSOMEIP_INFO << __func__ << ": Notifying " << std::hex << std::setfill('0') << std::setw(4) << get_service() << "."
                          << get_instance() << "." << get_event() << " failed. Event payload not (yet) set!";
             pending_.insert(_target);
+            if (_completion) {
+                _completion->begin();
+                _completion->end();
+            }
         }
     } else {
         VSOMEIP_WARNING << __func__ << ": Notifying " << std::hex << std::setfill('0') << std::setw(4) << get_service() << "."
                         << get_instance() << "." << get_event() << " failed. Target undefined";
+        if (_completion) {
+            _completion->begin();
+            _completion->end();
+        }
     }
 }
 
 void event::notify_one(client_t _client, bool _force) {
 
     std::lock_guard<std::mutex> its_lock(mutex_);
-    notify_one_unlocked(_client, _force);
+    notify_one_unlocked(_client, _force, nullptr);
 }
 
-void event::notify_one_unlocked(client_t _client, bool _force) {
+void event::notify_one_unlocked(client_t _client, bool _force, send_completion_state_ptr_t _completion) {
 
     if (is_set_) {
         set_session();
-        routing_->send(_client, update_, _force);
+        routing_->send(_client, update_, _force, std::move(_completion));
     } else {
         VSOMEIP_INFO << __func__ << ": Initial value for [" << std::hex << std::setfill('0') << std::setw(4) << get_service() << "."
                      << get_instance() << "." << get_event() << "] not yet set by the service/client."
                      << " Client " << _client << " will not receive any initial notification!";
+        if (_completion) {
+            _completion->begin();
+            _completion->end();
+        }
     }
 }
 

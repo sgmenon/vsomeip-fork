@@ -12,11 +12,11 @@ namespace profile07 {
 
 uint64_t profile_07::compute_crc(const profile_config& _config, const buffer_view& _buffer) {
 
-    buffer_view its_before(_buffer, _config.offset_);
+    const buffer_view its_before = _buffer.subspan(0, _config.offset_);
     uint64_t computed_crc = e2e_crc::calculate_profile_07(its_before);
 
     if (_config.offset_ + 8 < _buffer.size()) {
-        buffer_view its_after(_buffer, _config.offset_ + 8, _buffer.size());
+        const buffer_view its_after = _buffer.subspan(_config.offset_ + 8);
         computed_crc = e2e_crc::calculate_profile_07(its_after, computed_crc);
     }
 

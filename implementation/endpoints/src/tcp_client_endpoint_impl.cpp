@@ -330,7 +330,7 @@ void tcp_client_endpoint_impl::receive(message_buffer_ptr_t _recv_buffer, std::s
     }
 }
 
-void tcp_client_endpoint_impl::send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) {
+void tcp_client_endpoint_impl::send_queued(std::pair<buffer_sequence_ptr_t, uint32_t>& _entry) {
     std::scoped_lock its_lock{socket_mutex_};
 
     service_t its_service = 0;
@@ -436,7 +436,7 @@ bool tcp_client_endpoint_impl::is_magic_cookie(const message_buffer_ptr_t& _recv
     return (0 == std::memcmp(SERVICE_COOKIE, &(*_recv_buffer)[_offset], sizeof(SERVICE_COOKIE)));
 }
 
-void tcp_client_endpoint_impl::send_magic_cookie(send_buffer_sequence_ptr_t& _sequence) {
+void tcp_client_endpoint_impl::send_magic_cookie(buffer_sequence_ptr_t& _sequence) {
     if (max_message_size_ == MESSAGE_SIZE_UNLIMITED
         || max_message_size_ - _sequence->size() >= VSOMEIP_SOMEIP_HEADER_SIZE + VSOMEIP_SOMEIP_MAGIC_COOKIE_SIZE) {
         auto cookie = std::make_shared<message_buffer_t>(CLIENT_COOKIE, CLIENT_COOKIE + sizeof(CLIENT_COOKIE));
@@ -778,7 +778,7 @@ std::string tcp_client_endpoint_impl::get_remote_information() const {
 }
 
 void tcp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                        const send_buffer_sequence_ptr_t& _sent_msg) {
+                                        const buffer_sequence_ptr_t& _sent_msg) {
     (void)_bytes;
 
     std::scoped_lock<std::recursive_mutex> its_lock(mutex_);
@@ -786,8 +786,12 @@ void tcp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
 
     if (!_error) {
         if (queue_.size() > 0) {
-            queue_size_ -= queue_.front().first->size();
+            auto its_sequence = queue_.front().first;
+            queue_size_ -= its_sequence->size();
             queue_.pop_front();
+            if (its_sequence) {
+                its_sequence->complete(true);
+            }
 
             update_last_departure();
 
@@ -800,6 +804,8 @@ void tcp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
                     boost::asio::dispatch(strand_, [self, its_entry]() mutable { self->send_queued(its_entry); });
                 }
             }
+        } else if (_sent_msg) {
+            _sent_msg->complete(true);
         }
         return;
     } else {
@@ -807,6 +813,13 @@ void tcp_client_endpoint_impl::send_cbk(boost::system::error_code const& _error,
 
         if (_error == boost::asio::error::operation_aborted) {
             // endpoint was stopped
+            for (auto& its_entry : queue_) {
+                if (its_entry.first) {
+                    its_entry.first->complete(false);
+                }
+            }
+            queue_.clear();
+            queue_size_ = 0;
             shutdown_and_close_socket(false, false);
         } else {
             if (state_ == cei_state_e::CONNECTING) {

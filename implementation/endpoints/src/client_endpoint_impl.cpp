@@ -137,9 +137,9 @@ void client_endpoint_impl<Protocol>::stop(bool _due_to_error) {
 }
 
 template<typename Protocol>
-std::pair<send_buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::get_front() {
+std::pair<buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::get_front() {
 
-    std::pair<send_buffer_sequence_ptr_t, uint32_t> its_entry;
+    std::pair<buffer_sequence_ptr_t, uint32_t> its_entry;
     if (queue_.size())
         its_entry = queue_.front();
 
@@ -147,7 +147,7 @@ std::pair<send_buffer_sequence_ptr_t, uint32_t> client_endpoint_impl<Protocol>::
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool client_endpoint_impl<Protocol>::send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) {
 
     (void)_target;
     (void)_sequence;
@@ -168,7 +168,7 @@ bool client_endpoint_impl<Protocol>::send_error(const std::shared_ptr<endpoint_d
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::send(const send_buffer_sequence_ptr_t& _sequence) {
+bool client_endpoint_impl<Protocol>::send(const buffer_sequence_ptr_t& _sequence) {
 
     if (!_sequence || _sequence->empty()) {
         return false;
@@ -309,7 +309,7 @@ void client_endpoint_impl<Protocol>::send_segments(const tp::tp_split_messages_t
     }
 
     for (const auto& s : _segments) {
-        queue_.emplace_back(std::make_pair(std::make_shared<send_buffer_sequence>(s), _separation_time));
+        queue_.emplace_back(std::make_pair(std::make_shared<buffer_sequence>(s), _separation_time));
         queue_size_ += s->size();
     }
 
@@ -512,17 +512,32 @@ void client_endpoint_impl<Protocol>::wait_connecting_cbk(boost::system::error_co
     }
 }
 
+namespace {
+template<typename Queue>
+void fail_queue_completions(Queue& _queue) {
+    for (auto& its_entry : _queue) {
+        if (its_entry.first) {
+            its_entry.first->complete(false);
+        }
+    }
+}
+} // namespace
+
 template<typename Protocol>
 void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                              const send_buffer_sequence_ptr_t& _sent_msg) {
+                                              const buffer_sequence_ptr_t& _sent_msg) {
 
     (void)_bytes;
 
     if (!_error) {
         std::lock_guard<std::recursive_mutex> its_lock(mutex_);
         if (queue_.size() > 0) {
-            queue_size_ -= queue_.front().first->size();
+            auto its_sequence = queue_.front().first;
+            queue_size_ -= its_sequence->size();
             queue_.pop_front();
+            if (its_sequence) {
+                its_sequence->complete(true);
+            }
 
             update_last_departure();
 
@@ -538,6 +553,8 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                     is_sending_ = false;
                 }
             }
+        } else if (_sent_msg) {
+            _sent_msg->complete(true);
         }
         return;
     } else if (_error == boost::asio::error::broken_pipe) {
@@ -546,6 +563,9 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                         << get_remote_information() << " endpoint > " << this << " socket state > " << to_string(state_.load());
 
         if (!ensure_connected(_error)) {
+            if (_sent_msg) {
+                _sent_msg->complete(false);
+            }
             return;
         }
 
@@ -554,6 +574,7 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
             std::lock_guard<std::recursive_mutex> its_lock(mutex_);
             stopping = endpoint_impl<Protocol>::sending_blocked_;
             if (stopping) {
+                fail_queue_completions(queue_);
                 queue_.clear();
                 queue_size_ = 0;
             } else {
@@ -587,11 +608,15 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
                         << get_remote_information() << " endpoint > " << this << " socket state > " << to_string(state_.load());
 
         if (!ensure_connected(_error)) {
+            if (_sent_msg) {
+                _sent_msg->complete(false);
+            }
             return;
         }
 
         if (_error == boost::asio::error::no_permission) {
             std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+            fail_queue_completions(queue_);
             queue_.clear();
             queue_size_ = 0;
         }
@@ -603,6 +628,13 @@ void client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _
         VSOMEIP_WARNING << "cei::send_cbk received error: " << _error.message() << " (" << std::dec << _error.value()
                         << "), remote: " << get_remote_information() << ", endpoint > " << this << " socket state > "
                         << to_string(state_.load());
+
+        {
+            std::lock_guard<std::recursive_mutex> its_lock(mutex_);
+            fail_queue_completions(queue_);
+            queue_.clear();
+            queue_size_ = 0;
+        }
 
         if (!ensure_connected(_error)) {
             return;
@@ -812,7 +844,7 @@ typename endpoint_impl<Protocol>::cms_ret_e client_endpoint_impl<Protocol>::segm
 }
 
 template<typename Protocol>
-bool client_endpoint_impl<Protocol>::check_queue_limit(const send_buffer_sequence_ptr_t& _sequence, std::uint32_t _size) const {
+bool client_endpoint_impl<Protocol>::check_queue_limit(const buffer_sequence_ptr_t& _sequence, std::uint32_t _size) const {
 
     if (endpoint_impl<Protocol>::queue_limit_ != QUEUE_SIZE_UNLIMITED
         && (queue_size_ + _size > endpoint_impl<Protocol>::queue_limit_ || queue_size_ + _size < _size)) { // overflow protection

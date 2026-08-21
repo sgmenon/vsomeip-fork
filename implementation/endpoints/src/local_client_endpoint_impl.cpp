@@ -25,7 +25,7 @@ local_client_endpoint_impl<Protocol>::local_client_endpoint_impl(const std::shar
 
 template<typename Protocol>
 void local_client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code const& _error, std::size_t _bytes,
-                                                    const send_buffer_sequence_ptr_t& _sent_msg) {
+                                                    const buffer_sequence_ptr_t& _sent_msg) {
 
     if (!_error) {
         client_endpoint_impl<Protocol>::send_cbk(_error, _bytes, _sent_msg);
@@ -46,6 +46,11 @@ void local_client_endpoint_impl<Protocol>::send_cbk(boost::system::error_code co
         client_endpoint_impl<Protocol>::was_not_connected_ = true;
         client_endpoint_impl<Protocol>::is_sending_ = false;
         if (endpoint_impl<Protocol>::sending_blocked_) {
+            for (auto& its_entry : client_endpoint_impl<Protocol>::queue_) {
+                if (its_entry.first) {
+                    its_entry.first->complete(false);
+                }
+            }
             client_endpoint_impl<Protocol>::queue_.clear();
             client_endpoint_impl<Protocol>::queue_size_ = 0;
         }

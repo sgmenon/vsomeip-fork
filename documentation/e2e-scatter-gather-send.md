@@ -35,14 +35,14 @@ reassemble to contiguous memory; `check()` and strip stay on that path.
 
 ## 2. What changed
 
-| Layer                  | Before                                      | After                                                   |
-| ---------------------- | ------------------------------------------- | ------------------------------------------------------- |
-| App payload            | Often pre-sized with E2E holes              | Hole-free user data                                     |
-| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect` → `protect_result`                     |
-| E2E check / strip      | `check` + `get_unprotected_payload`         | `check` → `check_result` (spans into receive buffer)    |
-| Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `send_buffer_sequence`, always `send(sequence)` |
-| Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `send_buffer_sequence`                           |
-| TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                    |
+| Layer                  | Before                                      | After                                                |
+| ---------------------- | ------------------------------------------- | ---------------------------------------------------- |
+| App payload            | Often pre-sized with E2E holes              | Hole-free user data                                  |
+| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect` → `protect_result`                  |
+| E2E check / strip      | `check` + `get_unprotected_payload`         | `check` → `check_result` (spans into receive buffer) |
+| Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `buffer_sequence`, always `send(sequence)`   |
+| Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `buffer_sequence`                             |
+| TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                 |
 
 JSON E2E configuration is unchanged. Profiles, offsets, and
 `e2e_enabled` keep working the same way — only the _application payload
@@ -62,19 +62,21 @@ peer will not.
 Receive delivery to the application is hole-free again after a successful
 check + strip. Application handlers should not see the E2E header bytes.
 
-External E2E plugins (for example GM SecOC) should implement the same
-`protect` / `check` contract when they move onto this path.
+External E2E plugins should implement the same `protect` / `check` contract when they move onto this path. Stock `libvsomeip3-e2e` **refuses** standard AUTOSAR profiles for SOME/IP-SD (`service_id`, `0xFFFF`): routing may still call protect/check on `send_via_sd` /
+SD `on_message`, but only a dedicated plugin should register that ID.
 
-## 4. The type that carries it: `send_buffer_sequence`
+Misconfiguring P01/P04/P05/P07 on SD is rejected at `add_configuration`.
+
+## 4. The type that carries it: `buffer_sequence`
 
 Defined in
 [`implementation/endpoints/include/buffer.hpp`](../implementation/endpoints/include/buffer.hpp).
 
 It is an owning multi-buffer send unit:
 
-- **`storage_`** — `shared_ptr`s to the real byte vectors (lifetime across
-  async completion)
-- **`buffers_`** — Asio `const_buffer` views over those vectors
+- **`segments_`** — ordered owned vectors and/or pinned `shared_ptr<payload>`
+  entries (lifetime across async completion)
+- **`buffers_`** — Asio `const_buffer` views over those segments
 
 Useful operations:
 
@@ -84,7 +86,7 @@ Useful operations:
 - `flatten()` — escape hatch for legacy pointer-arithmetic paths
   (SOME/IP-TP split, tracing). Prefer not to live there.
 
-The nPDU `train` now holds a `send_buffer_sequence_ptr_t` and appends
+The nPDU `train` now holds a `buffer_sequence_ptr_t` and appends
 passenger messages with `append_sequence` instead of copying bytes into
 one blob.
 
@@ -105,13 +107,14 @@ the protected area after the 16-byte SOME/IP header. Returned spans still
 point into the caller's receive buffer.
 
 [`protect_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
-is always scatter (owned buffers):
+returns scatter pieces for send composition:
 
-- **`e2e_header`** — optional E2E prefix (offset padding belongs here)
-- **`app_payload`** — hole-free user data. For some profiles (like AUTOSAR Profile 1)
-  that can put CRCs in the middle of app data, use this field as a contiguous block.
-- **`e2e_footer`** — optional trailer (MAC / CRC after payload). Stock
-  AUTOSAR profiles leave this empty; plugins such as SecOC use it.
+- **`e2e_header` / `e2e_footer`** — owned buffers (plugin allocates E2E meta)
+- **`app_payload`** — non-owning span into the caller's payload (routing pins
+  `shared_ptr<payload>` in `buffer_sequence` for async lifetime)
+- **`owned_app_payload`** — Profile 01 only; packed in-band CRC/counter/nibble
+
+See [`send-copy-elision.md`](send-copy-elision.md) for the zero-copy send path.
 
 [`check_result`](../implementation/e2e_protection/include/e2e/profile/protect_result.hpp)
 mirrors those three sections as **non-owning spans** plus `status`:
@@ -127,13 +130,13 @@ fields as `e2e_header` so routing can drop them without a second lookup.
 Routing composes the on-wire sequence in
 `compose_e2e_protected_sequence` inside
 [`routing_manager_impl.cpp`](../implementation/routing/src/routing_manager_impl.cpp)
-by **appending** pieces into one `send_buffer_sequence` — no concat:
+by **appending** pieces into one `buffer_sequence` — no concat:
 
 ```
 [SOME/IP header with fixed length] [e2e_header] [app_payload] [e2e_footer]
 ```
 
-Empty pieces are skipped. Each remaining vector stays in `storage_`;
+Empty pieces are skipped. Each remaining segment stays in `segments_`;
 `buffers()` is the matching `vector<const_buffer>` (an Asio
 `ConstBufferSequence`). The endpoint queues that object (the nPDU train
 `append_sequence`s passengers the same way). On the wire the socket
@@ -156,7 +159,7 @@ blob (SOME/IP-TP split, tracing). It is not the send path.
 App (hole-free payload)
   → serialize SOME/IP
   → protect (plugin owns E2E header / footer)
-  → send_buffer_sequence
+  → buffer_sequence
   → train.append_sequence (batch without concat)
   → async_write / async_send (buffers())
 ```

@@ -14,18 +14,18 @@ uint16_t profile_05::compute_crc(const profile_config& _config, const buffer_vie
 
     static const int crcSize = sizeof(uint16_t);
 
-    buffer_view its_before(_buffer, _config.offset_);
+    const buffer_view its_before = _buffer.subspan(0, _config.offset_);
     uint16_t computed_crc = e2e_crc::calculate_profile_05(its_before);
 
     if ((_config.offset_ + crcSize) < _buffer.size()) {
-        buffer_view its_after(_buffer, _config.offset_ + crcSize, _buffer.size());
+        const buffer_view its_after = _buffer.subspan(_config.offset_ + crcSize);
         computed_crc = e2e_crc::calculate_profile_05(its_after, computed_crc);
     }
 
     uint8_t dataId[2];
     dataId[0] = (_config.data_id_ >> 0) & 0xFF;
     dataId[1] = (_config.data_id_ >> 8) & 0xFF;
-    buffer_view dataIdView(dataId, sizeof(dataId));
+    const buffer_view dataIdView(dataId, sizeof(dataId));
 
     computed_crc = e2e_crc::calculate_profile_05(dataIdView, computed_crc);
 

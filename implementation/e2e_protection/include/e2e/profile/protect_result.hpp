@@ -20,10 +20,15 @@ namespace e2e {
 // Scatter pieces for the protected area (after SOME/IP base). Any piece may be
 // empty. Offset padding belongs at the front of e2e_header. Trailers (CRC/MAC)
 // belong in e2e_footer.
+//
+// app_payload is a non-owning view into the caller's input (same lifetime as
+// protect()'s buffer_view). owned_app_payload is set only when the profile must
+// pack bytes (Profile 01); routing appends that buffer instead of pinning input.
 struct protect_result {
     bool valid{false};
     std::shared_ptr<e2e_buffer> e2e_header;
-    std::shared_ptr<e2e_buffer> app_payload;
+    span<const uint8_t> app_payload;
+    std::shared_ptr<e2e_buffer> owned_app_payload;
     std::shared_ptr<e2e_buffer> e2e_footer;
 
     std::size_t size() const {
@@ -31,8 +36,10 @@ struct protect_result {
         if (e2e_header) {
             total += e2e_header->size();
         }
-        if (app_payload) {
-            total += app_payload->size();
+        if (owned_app_payload) {
+            total += owned_app_payload->size();
+        } else {
+            total += app_payload.size();
         }
         if (e2e_footer) {
             total += e2e_footer->size();
@@ -54,12 +61,12 @@ inline check_result make_check_result(profile_interface::check_status_t _status,
                                       std::size_t _footer_size = 0) {
     check_result its_result;
     its_result.status = _status;
-    if (_buffer.data_length() < _header_size + _footer_size) {
+    if (_buffer.size() < _header_size + _footer_size) {
         return its_result;
     }
-    its_result.e2e_header = span<const uint8_t>(_buffer.begin(), _header_size);
-    its_result.app_payload = span<const uint8_t>(_buffer.begin() + _header_size, _buffer.data_length() - _header_size - _footer_size);
-    its_result.e2e_footer = span<const uint8_t>(_buffer.begin() + _buffer.data_length() - _footer_size, _footer_size);
+    its_result.e2e_header = _buffer.subspan(0, _header_size);
+    its_result.app_payload = _buffer.subspan(_header_size, _buffer.size() - _header_size - _footer_size);
+    its_result.e2e_footer = _buffer.subspan(_buffer.size() - _footer_size, _footer_size);
     return its_result;
 }
 

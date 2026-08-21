@@ -11,8 +11,7 @@ namespace e2e {
 namespace profile_custom {
 
 uint32_t profile_custom::compute_crc(const profile_config& _config, const buffer_view& _buffer) {
-    uint32_t computed_crc =
-            e2e_crc::calculate_profile_custom(buffer_view(_buffer, static_cast<size_t>(_config.crc_offset_ + 4), _buffer.size()));
+    uint32_t computed_crc = e2e_crc::calculate_profile_custom(_buffer.subspan(static_cast<size_t>(_config.crc_offset_ + 4)));
     return computed_crc;
 }
 

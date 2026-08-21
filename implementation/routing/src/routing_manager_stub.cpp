@@ -24,6 +24,7 @@
 #include "../../endpoints/include/endpoint_manager_impl.hpp"
 #include "../../endpoints/include/abstract_socket_factory.hpp"
 #include "../../endpoints/include/server_endpoint.hpp"
+#include "../../endpoints/include/buffer.hpp"
 #include "../../protocol/include/deregister_application_command.hpp"
 #include "../../protocol/include/distribute_security_policies_command.hpp"
 #include "../../protocol/include/dummy_command.hpp"
@@ -439,8 +440,16 @@ void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpo
         its_command.deserialize(its_buffer, its_error);
         if (its_error == protocol::error_e::ERROR_OK) {
 
-            auto its_message_data(its_command.get_message());
-            if (its_message_data.size() > VSOMEIP_MESSAGE_TYPE_POS) {
+            // Keep the IPC frame alive and pin SOME/IP header/payload slices for remote send.
+            auto its_frame = std::make_shared<message_buffer_t>(std::move(its_buffer));
+            if (its_frame->size() <= protocol::SEND_COMMAND_HEADER_SIZE + VSOMEIP_MESSAGE_TYPE_POS) {
+                break;
+            }
+            const std::size_t its_someip_offset = protocol::SEND_COMMAND_HEADER_SIZE;
+            const byte_t* its_message_data = its_frame->data() + its_someip_offset;
+            const length_t its_message_size = static_cast<length_t>(its_frame->size() - its_someip_offset);
+
+            if (its_message_size > VSOMEIP_MESSAGE_TYPE_POS) {
 
                 its_service = bithelper::read_uint16_be(&its_message_data[VSOMEIP_SERVICE_POS_MIN]);
                 its_method = bithelper::read_uint16_be(&its_message_data[VSOMEIP_METHOD_POS_MIN]);
@@ -450,8 +459,6 @@ void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpo
                 is_reliable = its_command.is_reliable();
                 its_check_status = its_command.get_status();
 
-                // Allow response messages from local proxies as answer to remote requests
-                // but check requests sent by local proxies to remote against policy.
                 if (utility::is_request(its_message_data[VSOMEIP_MESSAGE_TYPE_POS])) {
                     if (VSOMEIP_SEC_OK
                         != configuration_->get_security()->is_client_allowed_to_access_member(_sec_client, its_service, its_instance,
@@ -463,14 +470,14 @@ void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpo
                         return;
                     }
                 }
-                // reduce by size of instance, flush, reliable, client and is_valid_crc flag
                 uint32_t its_contained_size = bithelper::read_uint32_be(&its_message_data[VSOMEIP_LENGTH_POS_MIN]);
-                if (its_message_data.size() != its_contained_size + VSOMEIP_SOMEIP_HEADER_SIZE) {
+                if (its_message_size != its_contained_size + VSOMEIP_SOMEIP_HEADER_SIZE) {
                     VSOMEIP_WARNING << "Received a SEND command containing message with invalid "
                                        "size -> skip!";
                     break;
                 }
-                host_->on_message(its_service, its_instance, &its_message_data[0], length_t(its_message_data.size()), is_reliable,
+                host_->on_message(its_service, its_instance,
+                                  owned_buffer_slice::slice(std::move(its_frame), its_someip_offset, its_message_size), is_reliable,
                                   _bound_client, _sec_client, its_check_status, false);
             }
         }

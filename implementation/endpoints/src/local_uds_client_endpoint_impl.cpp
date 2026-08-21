@@ -184,7 +184,7 @@ void local_uds_client_endpoint_impl::receive() {
 
 // this overrides client_endpoint_impl::send to disable the pull method
 // for local communication
-bool local_uds_client_endpoint_impl::send(const send_buffer_sequence_ptr_t& _sequence) {
+bool local_uds_client_endpoint_impl::send(const buffer_sequence_ptr_t& _sequence) {
     if (!_sequence || _sequence->empty()) {
         return false;
     }
@@ -209,11 +209,11 @@ bool local_uds_client_endpoint_impl::send(const send_buffer_sequence_ptr_t& _seq
     queue_train_buffer(_size);
     train_->sequence_->append_sequence(*_sequence);
     queue_train(train_);
-    train_->sequence_ = std::make_shared<send_buffer_sequence>();
+    train_->sequence_ = std::make_shared<buffer_sequence>();
     return true;
 }
 
-void local_uds_client_endpoint_impl::send_queued(std::pair<send_buffer_sequence_ptr_t, uint32_t>& _entry) {
+void local_uds_client_endpoint_impl::send_queued(std::pair<buffer_sequence_ptr_t, uint32_t>& _entry) {
 
     static const byte_t its_start_tag[] = {0x67, 0x37, 0x6D, 0x07};
     static const byte_t its_end_tag[] = {0x07, 0x6D, 0x37, 0x67};
@@ -341,7 +341,7 @@ bool local_uds_client_endpoint_impl::queue_train_buffer(std::uint32_t _size) {
     if (train_->sequence_->size() + _size > max_message_size_ && !train_->sequence_->empty()) {
         queue_.push_back(std::make_pair(train_->sequence_, 0));
         queue_size_ += train_->sequence_->size();
-        train_->sequence_ = std::make_shared<send_buffer_sequence>();
+        train_->sequence_ = std::make_shared<buffer_sequence>();
         return true;
     }
     return false;

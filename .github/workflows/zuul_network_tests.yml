@@ -18,16 +18,23 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  SANITIZER_TYPE: LEAK
   VALGRIND_TYPE: ""
   ENABLE_COVERAGE: "False"
 
 jobs:
   network-tests:
-    name: CMake network tests
+    name: CMake network (${{ matrix.sanitizer }})
     if: github.event_name == 'workflow_dispatch' || contains(github.event.pull_request.labels.*.name, 'run-zuul')
     runs-on: ubuntu-22.04
     timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [ADDRESS, LEAK, THREAD, UNDEFINED]
+    env:
+      SANITIZER_TYPE: ${{ matrix.sanitizer }}
+      BUILD_DIR: ${{ github.workspace }}/build-network-tests-${{ matrix.sanitizer }}
+      LOGS_DIR: ${{ github.workspace }}/logs-${{ matrix.sanitizer }}
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +47,7 @@ jobs:
       - name: Build and run network tests
         run: |
           set -euo pipefail
-          mkdir -p logs build-network-tests
+          mkdir -p "$LOGS_DIR" "$BUILD_DIR"
           docker compose --project-directory zuul/network-tests build
           docker compose --project-directory zuul/network-tests up --abort-on-container-exit --exit-code-from master
 
@@ -48,12 +55,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: zuul-network-tests
+          name: zuul-network-tests-${{ matrix.sanitizer }}
           path: |
-            logs/tests_result.json
-            logs/junit.tgz
-            logs/failed-junit.tgz
-            logs/failed-junit/
+            logs-${{ matrix.sanitizer }}/tests_result.json
+            logs-${{ matrix.sanitizer }}/junit.tgz
+            logs-${{ matrix.sanitizer }}/failed-junit.tgz
+            logs-${{ matrix.sanitizer }}/failed-junit/
           if-no-files-found: ignore
           retention-days: 14
 

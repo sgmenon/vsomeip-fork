@@ -87,6 +87,7 @@ VSOMEIP_LINKOPTS = select({
 
 THIRD_PARTY_DEPS = [
     "@boost.asio",
+    "@boost.core",
     "@boost.date_time",
     "@boost.filesystem",
     "@boost.functional",
@@ -477,8 +478,8 @@ cc_shared_library(
 cc_import(
     name = "vsomeip-core",
     shared_library = ":vsomeip3-core",
-    deps = [":vsomeip_hdrs"],
     visibility = ["//visibility:public"],
+    deps = [":vsomeip_hdrs"],
 )
 
 # =============================================================================
@@ -524,19 +525,19 @@ cc_shared_library(
     # therefore have exactly one home — `libvsomeip3-core.so.3` — across
     # vsomeip3.so / vsomeip3-sd.so / vsomeip3-cfg.so.
     dynamic_deps = [":vsomeip3-core"],
-    deps = [":vsomeip-lib"],
     visibility = ["//visibility:public"],
+    deps = [":vsomeip-lib"],
 )
 
 # Public boundary for external vsomeip consumers.
 cc_import(
     name = "vsomeip",
     shared_library = ":vsomeip3",
+    visibility = ["//visibility:public"],
     deps = [
         ":vsomeip-core",
         ":vsomeip_hdrs",
     ],
-    visibility = ["//visibility:public"],
 )
 
 # =============================================================================
@@ -663,11 +664,11 @@ genrule(
 cc_import(
     name = "vsomeip-sd",
     shared_library = ":vsomeip3-sd",
+    visibility = ["//visibility:public"],
     deps = [
         ":vsomeip-core",
         ":vsomeip-internal-hdrs",
     ],
-    visibility = ["//visibility:public"],
 )
 
 # =============================================================================
@@ -701,20 +702,23 @@ VSOMEIP_E2E_SRCS = [
 ]
 
 cc_library(
-    name = "vsomeip-e2e",
+    name = "vsomeip-e2e-lib",
     srcs = VSOMEIP_E2E_SRCS,
     hdrs = VSOMEIP_INTERNAL_HDRS,
     copts = VSOMEIP_COPTS,
     defines = VSOMEIP_DEFINES,
     linkopts = VSOMEIP_LINKOPTS,
-    deps = [":vsomeip-core"],
+    deps = [
+        ":vsomeip-core",
+        "@boost.core",
+    ],
 )
 
 cc_shared_library(
     name = "vsomeip3-e2e-unversioned",
     dynamic_deps = [":vsomeip3"],
     user_link_flags = ["-Wl,-soname,libvsomeip3-e2e.so.3"],
-    deps = [":vsomeip-e2e"],
+    deps = [":vsomeip-e2e-lib"],
 )
 
 # Create versioned library name that vsomeip expects
@@ -724,4 +728,14 @@ genrule(
     outs = ["libvsomeip3-e2e.so.3"],
     cmd = "cp $(location :vsomeip3-e2e-unversioned) $@",
     visibility = ["//visibility:public"],
+)
+
+cc_import(
+    name = "vsomeip-e2e",
+    shared_library = ":vsomeip3-e2e",
+    visibility = ["//visibility:public"],
+    deps = [
+        ":vsomeip-core",
+        ":vsomeip-internal-hdrs",
+    ],
 )

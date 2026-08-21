@@ -353,7 +353,7 @@ void udp_server_endpoint_impl::receive_multicast_unlocked(std::shared_ptr<messag
     }
 }
 
-bool udp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const send_buffer_sequence_ptr_t& _sequence) {
+bool udp_server_endpoint_impl::send_to(const std::shared_ptr<endpoint_definition> _target, const buffer_sequence_ptr_t& _sequence) {
     std::scoped_lock its_lock(mutex_);
     bool result = false;
     if (_target) {
@@ -374,7 +374,7 @@ bool udp_server_endpoint_impl::send_error(const std::shared_ptr<endpoint_definit
     bool can_be_send = check_queue_limit(_data, _size, its_data) && check_message_size(_size);
 
     if (can_be_send) {
-        its_data.queue_.emplace_back(std::make_shared<send_buffer_sequence>(_data, _size), 0);
+        its_data.queue_.emplace_back(std::make_shared<buffer_sequence>(_data, _size), 0);
         its_data.queue_size_ += _size;
 
         if (!its_data.is_sending_ && unicast_socket_) { // no writing in progress
