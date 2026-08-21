@@ -71,14 +71,18 @@ void memory_test_service::message_sender(std::atomic<bool>& stop_checking_) {
     its_payload->set_data(std::vector<uint8_t>(NOTIFY_PAYLOAD_SIZE, 20));
     its_payload2->set_data(std::vector<uint8_t>(NOTIFY_PAYLOAD_SIZE, 10));
     int count{0};
+    // Reused payloads stay immutable here. Pass a completion handler so notify
+    // pins instead of snapshotting on every call (shared payload, no completion
+    // ⇒ one copy per notify), which would inflate RSS under sanitizers.
+    static const vsomeip::send_completion_handler_t pin_only = [](bool) {};
     for (int message_no = 0; message_no <= TEST_MESSAGE_NUMBER; message_no++) {
         for (uint16_t i = 0; i < TEST_EVENT_NUMBER; i++) {
-            _app->notify(MEMORY_SERVICE, MEMORY_INSTANCE, MEMORY_EVENT + i, its_payload);
+            _app->notify(MEMORY_SERVICE, MEMORY_INSTANCE, MEMORY_EVENT + i, its_payload, false, pin_only);
             count++;
         }
         std::this_thread::sleep_for(MESSAGE_SENDER_INTERVAL);
         for (uint16_t i = 0; i < TEST_EVENT_NUMBER; i++) {
-            _app->notify(MEMORY_SERVICE, MEMORY_INSTANCE, MEMORY_EVENT + i, its_payload2);
+            _app->notify(MEMORY_SERVICE, MEMORY_INSTANCE, MEMORY_EVENT + i, its_payload2, false, pin_only);
             count++;
         }
         std::this_thread::sleep_for(MESSAGE_SENDER_INTERVAL);
