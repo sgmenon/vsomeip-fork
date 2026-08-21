@@ -878,8 +878,10 @@ bool routing_manager_base::send(client_t _client, std::shared_ptr<message> _mess
     std::shared_ptr<serializer> its_serializer(get_serializer());
     if (its_serializer->serialize(_message.get())) {
         auto const sec_client = get_sec_client();
-        is_sent = send(_client, its_serializer->get_data(), its_serializer->get_size(), _message->get_instance(), _message->is_reliable(),
-                       get_client(), &sec_client, 0, false, _force);
+        auto its_frame = std::make_shared<message_buffer_t>(its_serializer->get_data(),
+                                                            its_serializer->get_data() + its_serializer->get_size());
+        is_sent = send(_client, std::move(its_frame), _message->get_instance(), _message->is_reliable(), get_client(), &sec_client, 0,
+                       false, _force);
         its_serializer->reset();
         put_serializer(its_serializer);
     } else {
@@ -1225,23 +1227,18 @@ bool routing_manager_base::send_local_notification(client_t _client, const buffe
     return has_remote;
 }
 
-bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const byte_t* _data, uint32_t _size,
-                                      instance_t _instance, bool _reliable, protocol::id_e _command, uint8_t _status_check) const {
-
-    if (!_data || _size == 0) {
-        return false;
-    }
-
-    // One owned buffer for the SOME/IP frame; scatter IPC meta + header slice + payload slice.
-    auto its_someip = std::make_shared<message_buffer_t>(_data, _data + _size);
+buffer_sequence_ptr_t routing_manager_base::sequence_from_frame(const message_buffer_ptr_t& _frame) {
     auto its_sequence = std::make_shared<buffer_sequence>();
-    if (_size > VSOMEIP_FULL_HEADER_SIZE) {
-        its_sequence->append_buffer_slice(its_someip, 0, VSOMEIP_FULL_HEADER_SIZE);
-        its_sequence->append_buffer_slice(its_someip, VSOMEIP_FULL_HEADER_SIZE, _size - VSOMEIP_FULL_HEADER_SIZE);
-    } else {
-        its_sequence->append(std::move(its_someip));
+    if (!_frame || _frame->empty()) {
+        return its_sequence;
     }
-    return send_local(_target, _client, its_sequence, _instance, _reliable, _command, _status_check, nullptr);
+    if (_frame->size() > VSOMEIP_FULL_HEADER_SIZE) {
+        its_sequence->append_buffer_slice(_frame, 0, VSOMEIP_FULL_HEADER_SIZE);
+        its_sequence->append_buffer_slice(_frame, VSOMEIP_FULL_HEADER_SIZE, _frame->size() - VSOMEIP_FULL_HEADER_SIZE);
+    } else {
+        its_sequence->append(_frame);
+    }
+    return its_sequence;
 }
 
 bool routing_manager_base::send_local(std::shared_ptr<endpoint>& _target, client_t _client, const buffer_sequence_ptr_t& _someip,

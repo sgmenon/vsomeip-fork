@@ -18,6 +18,8 @@
 
 #include <vsomeip/message.hpp>
 
+#include "../../endpoints/include/buffer.hpp"
+
 namespace vsomeip_v3 {
 
 class configuration;
@@ -39,8 +41,7 @@ public:
 
     virtual bool send(client_t _client, std::shared_ptr<message> _message, bool _force) = 0;
 
-    virtual bool send_via_sd(const std::shared_ptr<endpoint_definition>& _target, const byte_t* _data, uint32_t _size,
-                             uint16_t _sd_port) = 0;
+    virtual bool send_via_sd(const std::shared_ptr<endpoint_definition>& _target, message_buffer_ptr_t _frame, uint16_t _sd_port) = 0;
 
     virtual void add_routing_info(service_t _service, instance_t _instance, major_version_t _major, minor_version_t _minor, ttl_t _ttl,
                                   const boost::asio::ip::address& _reliable_address, uint16_t _reliable_port,

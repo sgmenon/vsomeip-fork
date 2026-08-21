@@ -104,11 +104,13 @@ the sequence to endpoints. Service Discovery is an exception: SD messages store
 entries/options (not a payload), so that path still serializes via
 `serializer` into one owned buffer.
 
-Legacy `send(const byte_t*, size)` (routing stub, SD unicast via `send_via_sd`,
-serialized forwards) still copies once at sequence construction until those
-callers are migrated — except the **local-proxy → RM → remote** path, which
-now pins the IPC frame and scatters SOME/IP header + payload into the remote
-send sequence (E2E still allocates a writable 16-byte header for length).
+Legacy `send(message_buffer_ptr_t)` (routing stub forwards, SD unicast via
+`send_via_sd`, serializer fallback) always takes an **owned** SOME/IP frame.
+There is no raw `const byte_t*` data-plane send into routing anymore — callers
+that only have a temporary pointer allocate `shared_ptr<vector>` at the edge.
+The local-proxy → RM → remote path pins the IPC / flattened frame and scatters
+SOME/IP header + payload into the remote send sequence (E2E still allocates a
+writable 16-byte header for length).
 
 Local UDS/TCP `send_local` builds scatter `[IPC meta | SOME/IP header | payload]`
 (wire bytes unchanged). Routing-client `send(message)` skips full-frame
@@ -129,6 +131,8 @@ serializer flatten for non-SD messages and always pins `shared_ptr<payload>`
 - [x] RM stub pins IPC frame; remote send uses header/payload slices
 - [x] Exclusive pin / shared snapshot at `send`/`notify` API boundary (RM always pins)
 - [x] Optional `send_completion_handler_t` on `send`/`notify`/`notify_one`
+- [x] Data-plane `send(const byte_t*)` removed — `send(message_buffer_ptr_t)` / `send(message)` / sequences only
+- [x] `send_via_sd` takes owned frame; dead `send_to(byte*)` removed
 - [x] Receive path (check → strip → deliver) for app delivery — see [`receive-copy-elision.md`](receive-copy-elision.md) (endpoint `_pin` plumbing still open)
 - [ ] Avoid stub `send_command` message\_ copy when parsing SEND meta only
 

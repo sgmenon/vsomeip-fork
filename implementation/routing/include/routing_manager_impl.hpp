@@ -85,18 +85,12 @@ public:
     bool send(client_t _client, std::shared_ptr<message> _message, bool _force) override;
     bool send(client_t _client, std::shared_ptr<message> _message, bool _force, send_completion_state_ptr_t _completion) override;
 
-    bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
-              const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force);
-
-    bool send(client_t _client, const byte_t* _data, uint32_t _size, instance_t _instance, bool _reliable, client_t _bound_client,
-              const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force,
-              message_buffer_ptr_t _pin);
+    bool send(client_t _client, message_buffer_ptr_t _frame, instance_t _instance, bool _reliable, client_t _bound_client,
+              const vsomeip_sec_client_t* _sec_client, uint8_t _status_check, bool _sent_from_remote, bool _force) override;
 
     bool send_to(const client_t _client, const std::shared_ptr<endpoint_definition>& _target, std::shared_ptr<message> _message);
 
-    bool send_to(const std::shared_ptr<endpoint_definition>& _target, const byte_t* _data, uint32_t _size, instance_t _instance);
-
-    bool send_via_sd(const std::shared_ptr<endpoint_definition>& _target, const byte_t* _data, uint32_t _size, uint16_t _sd_port);
+    bool send_via_sd(const std::shared_ptr<endpoint_definition>& _target, message_buffer_ptr_t _frame, uint16_t _sd_port);
 
     void register_event(client_t _client, service_t _service, instance_t _instance, event_t _notifier,
                         const std::set<eventgroup_t>& _eventgroups, const event_type_e _type, reliability_type_e _reliability,

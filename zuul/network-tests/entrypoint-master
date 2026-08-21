@@ -81,7 +81,10 @@ for ((n = 0; n < stress_times[0]; n++)); do
 			fi
 
 			kill %1
-			run-both kill -KILL -1 || :
+			# Do not inherit ASan into kill(1): with LD_PRELOAD=libasan,
+			# `kill -KILL -1` maps a huge VA and can hang, stalling the suite
+			# after the first test.
+			env -u LD_PRELOAD -u ASAN_OPTIONS run-both kill -KILL -1 || :
 		done
 	done
 done

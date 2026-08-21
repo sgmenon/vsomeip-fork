@@ -58,7 +58,9 @@ This page will guide you to accomplish that goal.
 
    The compose harness preloads `libasan.so` when `SANITIZER_TYPE=ADDRESS`
    (required because vsomeip `dlopen`s plugins; without that you get
-   `ASan runtime does not come first in initial library list`).
+   `ASan runtime does not come first in initial library list`). Between-test
+   cleanup runs `kill` with `LD_PRELOAD` cleared so ASan does not hang the
+   suite after the first test.
 
    **Unit tests (Bazel)**
 

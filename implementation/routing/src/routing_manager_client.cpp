@@ -803,24 +803,17 @@ bool routing_manager_client::send(client_t _client, std::shared_ptr<message> _me
     return is_sent;
 }
 
-bool routing_manager_client::send(client_t _client, const byte_t* _data, length_t _size, instance_t _instance, bool _reliable,
+bool routing_manager_client::send(client_t _client, message_buffer_ptr_t _frame, instance_t _instance, bool _reliable,
                                   client_t _bound_client, const vsomeip_sec_client_t* _sec_client, uint8_t _status_check,
                                   bool _sent_from_remote, bool _force) {
 
-    if (!_data || _size == 0) {
+    if (!_frame || _frame->empty()) {
         return false;
     }
 
-    auto its_someip = std::make_shared<message_buffer_t>(_data, _data + _size);
-    auto its_sequence = std::make_shared<buffer_sequence>();
-    if (_size > VSOMEIP_FULL_HEADER_SIZE) {
-        its_sequence->append_buffer_slice(its_someip, 0, VSOMEIP_FULL_HEADER_SIZE);
-        its_sequence->append_buffer_slice(its_someip, VSOMEIP_FULL_HEADER_SIZE, _size - VSOMEIP_FULL_HEADER_SIZE);
-    } else {
-        its_sequence->append(std::move(its_someip));
-    }
-    return send_with_someip_sequence(_client, its_sequence, _data, _size, _instance, _reliable, _bound_client, _sec_client, _status_check,
-                                     _sent_from_remote, _force, nullptr);
+    auto its_sequence = sequence_from_frame(_frame);
+    return send_with_someip_sequence(_client, its_sequence, _frame->data(), static_cast<length_t>(_frame->size()), _instance, _reliable,
+                                     _bound_client, _sec_client, _status_check, _sent_from_remote, _force, nullptr);
 }
 
 bool routing_manager_client::send_with_someip_sequence(client_t _client, const buffer_sequence_ptr_t& _sequence, const byte_t* _hdr,
@@ -932,17 +925,6 @@ bool routing_manager_client::send_to(const client_t _client, const std::shared_p
     (void)_client;
     (void)_target;
     (void)_message;
-
-    return false;
-}
-
-bool routing_manager_client::send_to(const std::shared_ptr<endpoint_definition>& _target, const byte_t* _data, uint32_t _size,
-                                     instance_t _instance) {
-
-    (void)_target;
-    (void)_data;
-    (void)_size;
-    (void)_instance;
 
     return false;
 }
@@ -2331,8 +2313,10 @@ void routing_manager_client::notify_remote_initially(service_t _service, instanc
                     {
                         std::scoped_lock its_sender_lock{sender_mutex_};
                         if (sender_) {
-                            send_local(sender_, VSOMEIP_ROUTING_CLIENT, its_serializer->get_data(), its_serializer->get_size(), _instance,
-                                       false, protocol::id_e::NOTIFY_ID, 0);
+                            auto its_frame = std::make_shared<message_buffer_t>(its_serializer->get_data(),
+                                                                                its_serializer->get_data() + its_serializer->get_size());
+                            send_local(sender_, VSOMEIP_ROUTING_CLIENT, sequence_from_frame(its_frame), _instance, false,
+                                       protocol::id_e::NOTIFY_ID, 0);
                         }
                     }
                     its_serializer->reset();

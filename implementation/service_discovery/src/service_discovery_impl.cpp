@@ -2294,8 +2294,10 @@ bool service_discovery_impl::serialize_and_send(const std::vector<std::shared_pt
                 m->set_reboot_flag(its_session.second);
 
                 if (serializer_->serialize(m.get())) {
+                    auto its_frame = std::make_shared<message_buffer_t>(serializer_->get_data(),
+                                                                        serializer_->get_data() + serializer_->get_size());
                     if (host_->send_via_sd(endpoint_definition::get(_address, port_, reliable_, m->get_service(), m->get_instance()),
-                                           serializer_->get_data(), serializer_->get_size(), port_)) {
+                                           std::move(its_frame), port_)) {
                         increment_session(_address);
                     }
                 } else {
