@@ -119,7 +119,7 @@ serializer flatten for non-SD messages and always pins `shared_ptr<payload>`
 
 ## Implementation checklist
 
-- [x] Ordered `buffer_segment` list in `buffer_sequence`
+- [x] Ordered `owned_buffer_slice` list in `buffer_sequence`
 - [x] `append_message_payload` → `append_buffer_slice` on payload backing store
 - [x] `protect_result` span + P01 owned buffer
 - [x] Profile protectors: span out, no app copy (except P01)

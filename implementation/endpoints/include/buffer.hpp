@@ -78,32 +78,70 @@ private:
 typedef std::shared_ptr<send_completion_state> send_completion_state_ptr_t;
 
 /**
- * One ordered piece of a buffer_sequence: shared_ptr to a byte vector plus an
- * optional slice. Same ownership model for headers, meta, and payload bytes.
+ * Shared buffer + explicit byte range. One type for routing receive ingress
+ * and for pieces of a buffer_sequence.
+ *
+ * length is always explicit (never "0 means whole buffer"). Use whole() /
+ * is_whole() when the slice covers the entire buffer.
  */
-struct buffer_segment {
+struct owned_buffer_slice {
     message_buffer_ptr_t buffer;
-    std::size_t slice_offset{0};
-    std::size_t slice_length{0}; // 0 => entire buffer
-
-    std::size_t size() const {
-        if (!buffer) {
-            return 0;
-        }
-        if (slice_length > 0) {
-            return slice_length;
-        }
-        return buffer->size();
-    }
+    std::size_t offset{0};
+    std::size_t length{0};
 
     const byte_t* data() const {
         if (!buffer) {
             return nullptr;
         }
-        return buffer->data() + slice_offset;
+        return buffer->data() + offset;
     }
 
+    std::size_t size() const { return valid() ? length : 0; }
+
+    bool valid() const { return buffer && offset + length <= buffer->size(); }
+
     bool empty() const { return size() == 0; }
+
+    bool is_whole() const { return buffer && offset == 0 && length == buffer->size(); }
+
+    static owned_buffer_slice whole(message_buffer_ptr_t _buffer) {
+        owned_buffer_slice its_slice;
+        if (_buffer) {
+            its_slice.buffer = std::move(_buffer);
+            its_slice.offset = 0;
+            its_slice.length = its_slice.buffer->size();
+        }
+        return its_slice;
+    }
+
+    static owned_buffer_slice slice(message_buffer_ptr_t _buffer, std::size_t _offset, std::size_t _length) {
+        owned_buffer_slice its_slice;
+        if (_buffer && _offset + _length <= _buffer->size()) {
+            its_slice.buffer = std::move(_buffer);
+            its_slice.offset = _offset;
+            its_slice.length = _length;
+        }
+        return its_slice;
+    }
+
+    // Edge adapter when the caller only has a temporary pointer.
+    static owned_buffer_slice copy_of(const byte_t* _data, std::size_t _size) {
+        if (!_data || _size == 0) {
+            return owned_buffer_slice{};
+        }
+        return whole(std::make_shared<message_buffer_t>(_data, _data + _size));
+    }
+
+    // Prefer a pin covering [_data, _data+_size); otherwise copy_of.
+    static owned_buffer_slice from_pointer(const byte_t* _data, std::size_t _size, message_buffer_ptr_t _pin) {
+        if (!_data || _size == 0) {
+            return owned_buffer_slice{};
+        }
+        if (_pin && _data >= _pin->data() && (_data + _size) <= (_pin->data() + _pin->size())) {
+            return slice(std::move(_pin), static_cast<std::size_t>(_data - _pin->data()), _size);
+        }
+        return copy_of(_data, _size);
+    }
 };
 
 /**
@@ -112,7 +150,8 @@ struct buffer_segment {
  *
  * - append / prepend / append_bytes: exclusive buffers (headers, meta, copies).
  *   Asserts use_count == 1 — callers must std::move the only remaining ref.
- * - append_buffer_slice: shared pins (recv buffer, payload backing store).
+ * - append_buffer_slice / append(owned_buffer_slice): shared pins (recv buffer,
+ *   payload backing store).
  */
 struct buffer_sequence {
     buffer_sequence() = default;
@@ -135,9 +174,15 @@ struct buffer_sequence {
         }
         // Exclusive: this use case is for the only remaining shared_ptr to these bytes.
         assert(_buffer.use_count() == 1);
-        buffer_segment its_segment;
-        its_segment.buffer = std::move(_buffer);
-        segments_.push_back(std::move(its_segment));
+        segments_.push_back(owned_buffer_slice::whole(std::move(_buffer)));
+        rebuild_buffers();
+    }
+
+    void append(owned_buffer_slice _slice) {
+        if (_slice.empty()) {
+            return;
+        }
+        segments_.push_back(std::move(_slice));
         rebuild_buffers();
     }
 
@@ -146,15 +191,7 @@ struct buffer_sequence {
      * the lifetime of this sequence. May share with other slices / payloads.
      */
     void append_buffer_slice(message_buffer_ptr_t _buffer, std::size_t _offset, std::size_t _length) {
-        if (!_buffer || _length == 0 || _offset + _length > _buffer->size()) {
-            return;
-        }
-        buffer_segment its_segment;
-        its_segment.buffer = std::move(_buffer);
-        its_segment.slice_offset = _offset;
-        its_segment.slice_length = _length;
-        segments_.push_back(std::move(its_segment));
-        rebuild_buffers();
+        append(owned_buffer_slice::slice(std::move(_buffer), _offset, _length));
     }
 
     void append_bytes(const byte_t* _data, std::size_t _size) {
@@ -169,9 +206,7 @@ struct buffer_sequence {
             return;
         }
         assert(_buffer.use_count() == 1);
-        buffer_segment its_segment;
-        its_segment.buffer = std::move(_buffer);
-        segments_.insert(segments_.begin(), std::move(its_segment));
+        segments_.insert(segments_.begin(), owned_buffer_slice::whole(std::move(_buffer)));
         rebuild_buffers();
     }
 
@@ -206,14 +241,14 @@ struct buffer_sequence {
 
     std::size_t size() const {
         return std::accumulate(segments_.begin(), segments_.end(), std::size_t{0},
-                               [](std::size_t sum, const buffer_segment& s) { return sum + s.size(); });
+                               [](std::size_t sum, const owned_buffer_slice& s) { return sum + s.size(); });
     }
 
     bool empty() const { return size() == 0; }
 
     const std::vector<boost::asio::const_buffer>& buffers() const { return buffers_; }
 
-    const std::vector<buffer_segment>& segments() const { return segments_; }
+    const std::vector<owned_buffer_slice>& segments() const { return segments_; }
 
     /**
      * Read a big-endian uint16 from a logical offset across the sequence.
@@ -248,7 +283,7 @@ struct buffer_sequence {
      * (e.g. SOME/IP-TP split / trace callbacks). Normal send uses buffers().
      */
     message_buffer_ptr_t flatten() const {
-        if (segments_.size() == 1 && segments_.front().buffer && segments_.front().slice_length == 0) {
+        if (segments_.size() == 1 && segments_.front().is_whole()) {
             return segments_.front().buffer;
         }
         auto flat = std::make_shared<message_buffer_t>();
@@ -276,7 +311,7 @@ private:
         }
     }
 
-    std::vector<buffer_segment> segments_;
+    std::vector<owned_buffer_slice> segments_;
     std::vector<boost::asio::const_buffer> buffers_;
     std::vector<send_completion_state_ptr_t> completions_;
 };

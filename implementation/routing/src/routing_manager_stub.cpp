@@ -476,8 +476,9 @@ void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpo
                                        "size -> skip!";
                     break;
                 }
-                host_->on_message(its_service, its_instance, its_message_data, its_message_size, is_reliable, _bound_client, _sec_client,
-                                  its_check_status, false, its_frame);
+                host_->on_message(its_service, its_instance,
+                                  owned_buffer_slice::slice(std::move(its_frame), its_someip_offset, its_message_size), is_reliable,
+                                  _bound_client, _sec_client, its_check_status, false);
             }
         }
         break;
