@@ -888,7 +888,12 @@ void application_impl::send(std::shared_ptr<message> _message, send_completion_h
             _message->set_client(client_);
             _message->set_session(get_session(true));
         }
-        ensure_exclusive_message_payload(_message);
+        // Without a completion handler the caller may free/mutate immediately after
+        // send returns, so shared payloads must be snapshotted. With a completion
+        // handler the caller owns lifetime until the callback (typical free site).
+        if (!_completion) {
+            ensure_exclusive_message_payload(_message);
+        }
         auto its_latch = make_send_completion_latch(std::move(_completion));
         (void)routing_->send(client_, _message, false, std::move(its_latch));
     } else if (_completion) {
@@ -899,7 +904,8 @@ void application_impl::send(std::shared_ptr<message> _message, send_completion_h
 void application_impl::notify(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload, bool _force,
                               send_completion_handler_t _completion) const {
 
-    auto its_payload = snapshot_payload_if_shared(std::move(_payload));
+    // Completion handler ⇒ caller keeps payload stable until the callback; skip snapshot.
+    auto its_payload = _completion ? std::move(_payload) : snapshot_payload_if_shared(std::move(_payload));
     auto its_latch = make_send_completion_latch(std::move(_completion));
     if (routing_) {
         routing_->notify(_service, _instance, _event, its_payload, _force, std::move(its_latch));
@@ -911,7 +917,7 @@ void application_impl::notify(service_t _service, instance_t _instance, event_t 
 
 void application_impl::notify_one(service_t _service, instance_t _instance, event_t _event, std::shared_ptr<payload> _payload,
                                   client_t _client, bool _force, send_completion_handler_t _completion) const {
-    auto its_payload = snapshot_payload_if_shared(std::move(_payload));
+    auto its_payload = _completion ? std::move(_payload) : snapshot_payload_if_shared(std::move(_payload));
     auto its_latch = make_send_completion_latch(std::move(_completion));
     if (routing_) {
         routing_->notify_one(_service, _instance, _event, its_payload, _client, _force, std::move(its_latch));

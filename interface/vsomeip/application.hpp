@@ -417,8 +417,10 @@ public:
      * identifier.
      *
      * Zero-copy: pass an exclusive `shared_ptr` (e.g. `std::move(msg)`) so the
-     * payload can be pinned. If you keep a live `shared_ptr` to the message,
-     * the payload bytes are snapshotted once before send.
+     * payload can be pinned. If you keep a live `shared_ptr` to the message and
+     * omit `_completion`, the payload bytes are snapshotted once before send.
+     * If you pass `_completion`, the payload is pinned as-is — keep it alive and
+     * unchanged until the handler runs (a typical place to free/recycle).
      *
      * Optional `_completion` is invoked once when all local async writes
      * started by this call in this process have finished. Proxy clients: IPC
@@ -444,8 +446,10 @@ public:
      * the service provider.
      *
      * Zero-copy: pass an exclusive payload (`std::move`) to pin without copying.
-     * If you keep a live `shared_ptr`, bytes are snapshotted once so later
-     * `set_data` cannot corrupt in-flight sends.
+     * If you keep a live `shared_ptr` and omit `_completion`, bytes are
+     * snapshotted once so later `set_data` cannot corrupt in-flight sends.
+     * With `_completion`, the payload is pinned as-is — keep it alive/unchanged
+     * until the handler runs.
      *
      * Optional `_completion` covers local async writes started by this call
      * (same semantics as @ref send).

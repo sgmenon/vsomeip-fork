@@ -48,25 +48,29 @@ At the public API boundary (`application::send` / `notify`):
 
 - **Exclusive** — caller passes the only remaining `shared_ptr` (typically via
   `std::move`). Payload is **pinned**; no payload-sized copy.
-- **Shared** — caller still holds a live `shared_ptr`. Bytes are **snapshotted
-  once** into a fresh payload before routing stores/pins it, so later
-  `set_data` cannot corrupt in-flight async writes.
+- **Shared, no completion** — caller still holds a live `shared_ptr` and did not
+  pass a completion handler. Bytes are **snapshotted once** so later `set_data`
+  / free after return cannot corrupt in-flight async writes.
+- **Shared, with completion** — payload is **pinned as-is**. The caller must keep
+  it alive and unchanged until the completion handler runs (typical free /
+  recycle site). No payload-sized copy.
 
 Do not poll `use_count()` from application code; use `std::move` when you want
-zero-copy.
+zero-copy, or pass a completion handler when you want to free after the local
+write.
 
-- **`notify` / `notify_one`:** `snapshot_payload_if_shared` on the payload
-  argument.
-- **`send(message)`:** `ensure_exclusive_message_payload` on the message (shared
-  message, or exclusive message whose payload is still shared with the caller).
+- **`notify` / `notify_one`:** `snapshot_payload_if_shared` unless `_completion`
+  is set.
+- **`send(message)`:** `ensure_exclusive_message_payload` unless `_completion`
+  is set.
 
-Routing **always pins** `shared_ptr<payload>` into `buffer_sequence`. The
+Routing **always pins** payload bytes into `buffer_sequence`. The
 `_message_exclusive` flag is not threaded through RM.
 
 ### Optional completion handler
 
 ```cpp
-app->send(msg, [](bool ok) { /* local writes done */ });
+app->send(msg, [](bool ok) { /* local writes done — safe to free/recycle */ });
 app->notify(service, instance, event, payload, false, [](bool ok) { ... });
 ```
 
@@ -80,6 +84,7 @@ dispatcher.
 - Debounce-delayed later sends are out of scope.
 - If nothing is queued (unchanged field / no subscribers): fires immediately
   with `true`.
+- Providing `_completion` skips the shared-payload snapshot (see above).
 
 ### Types
 
@@ -104,7 +109,7 @@ the sequence to endpoints. Service Discovery is an exception: SD messages store
 entries/options (not a payload), so that path still serializes via
 `serializer` into one owned buffer.
 
-Legacy `send(message_buffer_ptr_t)` (routing stub forwards, SD unicast via
+Legacy `send(message_buffer_ptr_t)` (routing stub forwards, SD unicast viause
 `send_via_sd`, serializer fallback) always takes an **owned** SOME/IP frame.
 There is no raw `const byte_t*` data-plane send into routing anymore — callers
 that only have a temporary pointer allocate `shared_ptr<vector>` at the edge.
