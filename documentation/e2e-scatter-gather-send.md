@@ -62,8 +62,10 @@ peer will not.
 Receive delivery to the application is hole-free again after a successful
 check + strip. Application handlers should not see the E2E header bytes.
 
-External E2E plugins (for example GM SecOC) should implement the same
-`protect` / `check` contract when they move onto this path.
+External E2E plugins should implement the same `protect` / `check` contract when they move onto this path. Stock `libvsomeip3-e2e` **refuses** standard AUTOSAR profiles for SOME/IP-SD (`service_id`, `0xFFFF`): routing may still call protect/check on `send_via_sd` /
+SD `on_message`, but only a dedicated plugin should register that ID.
+
+Misconfiguring P01/P04/P05/P07 on SD is rejected at `add_configuration`.
 
 ## 4. The type that carries it: `buffer_sequence`
 

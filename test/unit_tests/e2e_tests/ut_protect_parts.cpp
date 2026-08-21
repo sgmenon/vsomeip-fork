@@ -23,6 +23,9 @@
 #include "../../../implementation/e2e_protection/include/e2e/profile/profile07/protector.hpp"
 #include "../../../implementation/e2e_protection/include/e2e/profile/profile_custom/checker.hpp"
 #include "../../../implementation/e2e_protection/include/e2e/profile/profile_custom/protector.hpp"
+#include "../../../implementation/e2e_protection/include/e2e/profile/e2e_provider_impl.hpp"
+#include "../../../implementation/configuration/include/e2e.hpp"
+#include "../../../implementation/service_discovery/include/constants.hpp"
 #include "../../../implementation/message/include/payload_impl.hpp"
 #include "../../../implementation/endpoints/include/buffer.hpp"
 #include "../../../implementation/routing/include/payload_ownership.hpp"
@@ -340,6 +343,36 @@ TEST(buffer_sequence_test, append_payload_pins_without_copy) {
     EXPECT_EQ(seq.segments().size(), 2U);
     EXPECT_EQ(seq.segments()[1].data(), payload_bytes);
     EXPECT_EQ(seq.flatten()->size(), 6U);
+}
+
+TEST(e2e_provider_test, stock_plugin_rejects_sd_service_configuration) {
+    vsomeip_v3::e2e::e2e_provider_impl provider;
+
+    auto sd_cfg = std::make_shared<vsomeip_v3::cfg::e2e>();
+    sd_cfg->variant = "both";
+    sd_cfg->profile = "P04";
+    sd_cfg->service_id = vsomeip_v3::sd::service;
+    sd_cfg->event_id = vsomeip_v3::sd::method;
+    sd_cfg->custom_parameters["data_id"] = "0x1234";
+    sd_cfg->custom_parameters["crc_offset"] = "0";
+
+    EXPECT_FALSE(provider.add_configuration(sd_cfg));
+    EXPECT_FALSE(provider.is_protected({vsomeip_v3::sd::service, vsomeip_v3::sd::method}));
+    EXPECT_FALSE(provider.is_checked({vsomeip_v3::sd::service, vsomeip_v3::sd::method}));
+
+    // Stock profiles still install for ordinary application IDs.
+    auto app_cfg = std::make_shared<vsomeip_v3::cfg::e2e>();
+    app_cfg->variant = "both";
+    app_cfg->profile = "P04";
+    app_cfg->service_id = 0x1234;
+    app_cfg->event_id = 0x0001;
+    app_cfg->custom_parameters["data_id"] = "0x1234";
+    app_cfg->custom_parameters["crc_offset"] = "0";
+
+    EXPECT_TRUE(provider.add_configuration(app_cfg));
+    EXPECT_TRUE(provider.is_protected({0x1234, 0x0001}));
+    EXPECT_TRUE(provider.is_checked({0x1234, 0x0001}));
+    EXPECT_FALSE(provider.is_protected({vsomeip_v3::sd::service, vsomeip_v3::sd::method}));
 }
 
 } // namespace

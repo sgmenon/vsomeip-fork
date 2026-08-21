@@ -718,7 +718,7 @@ cc_shared_library(
     name = "vsomeip3-e2e-unversioned",
     dynamic_deps = [":vsomeip3"],
     user_link_flags = ["-Wl,-soname,libvsomeip3-e2e.so.3"],
-    deps = [":vsomeip-e2e"],
+    deps = [":vsomeip-e2e-lib"],
 )
 
 # Create versioned library name that vsomeip expects

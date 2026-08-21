@@ -32,6 +32,8 @@
 
 namespace {
 
+constexpr vsomeip_v3::service_t k_sd_service = 0xFFFF;
+
 template<typename value_t>
 value_t read_value_from_config(const std::shared_ptr<vsomeip_v3::cfg::e2e>& _config, const std::string& _name,
                                value_t _default_value = value_t()) {
@@ -67,6 +69,10 @@ e2e_provider_impl::e2e_provider_impl() : plugin_impl("vsomeip e2e plugin", 1, pl
 e2e_provider_impl::~e2e_provider_impl() { }
 
 bool e2e_provider_impl::add_configuration(std::shared_ptr<cfg::e2e> config) {
+    if (!config ||config->service_id == k_sd_service) {
+        return false;
+    }
+
     if (config->profile == "CRC8" || config->profile == "P01") {
         process_e2e_profile<profile01::profile_config, profile01::profile_01_checker, profile01::protector>(config);
         return true;

@@ -1398,12 +1398,6 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                 };
 
                 if (e2e_provider_) {
-                    // GM - Begin
-                    if (is_service_discovery) {
-                        VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting SD message ..";
-                    } else {
-                        VSOMEIP_DEBUG << "routing_manager_impl::send() >>>> e2e_provider enabled, protecting non-SD message ..";
-                    }
 #ifndef ANDROID
                     its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, _instance, _pin);
                     if (its_e2e_sequence) {
@@ -1412,7 +1406,6 @@ bool routing_manager_impl::send(client_t _client, const byte_t* _data, length_t 
                         its_send_data = its_trace_flat->data();
                     }
 #endif
-                    // GM - End
                 }
                 if (is_request) {
                     its_target = ep_mgr_impl_->find_or_create_remote_client(its_service, _instance, _reliable);
@@ -1603,7 +1596,6 @@ bool routing_manager_impl::send_to(const std::shared_ptr<endpoint_definition>& _
 bool routing_manager_impl::send_via_sd(
         const std::shared_ptr<endpoint_definition> &_target,
         const byte_t *_data, uint32_t _size, uint16_t _sd_port) {
-    // GM - Begin
     instance_t its_instance(0x0);
     buffer_sequence_ptr_t its_e2e_sequence;
 
@@ -1613,7 +1605,6 @@ bool routing_manager_impl::send_via_sd(
         its_e2e_sequence = compose_e2e_protected_sequence(e2e_provider_, _data, _size, its_instance);
 #endif
     }
-    // GM - End
     bool is_sent{false};
     std::shared_ptr<endpoint> its_endpoint =
             ep_mgr_impl_->find_server_endpoint(_sd_port,
@@ -1887,23 +1878,21 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
     if (its_service == VSOMEIP_SD_SERVICE) {
         if (discovery_ && its_method == sd::method) {
             if (configuration_->get_sd_port() == _remote_port) {
-                // GM - Begin
                 if (e2e_provider_) {
-                        VSOMEIP_DEBUG << "routing_manager_impl::on_message() <<<< e2e_provider enabled, checking SD message ..";
+                    VSOMEIP_DEBUG << "routing_manager_impl::on_message() <<<< e2e_provider enabled, checking SD message ..";
 #ifndef ANDROID
-                                if (e2e_provider_->is_checked({its_service, its_method})) {
-                                    auto its_checked =
-                                            e2e_provider_->check({its_service, its_method}, buffer_view(_data, _size), its_instance);
-                                    its_check_status = its_checked.status;
-    
-                                    if (its_check_status != e2e::profile_interface::generic_check_status::E2E_OK) {
-                                        VSOMEIP_INFO << "E2E protection: CRC check failed for service: "
-                                                << std::hex << its_service << " method: " << its_method;
-                                    }
-                                }
+                    if (e2e_provider_->is_checked({its_service, its_method})) {
+                        auto its_checked =
+                                e2e_provider_->check({its_service, its_method}, buffer_view(_data, _size), its_instance);
+                        its_check_status = its_checked.status;
+
+                        if (its_check_status != e2e::profile_interface::generic_check_status::E2E_OK) {
+                            VSOMEIP_INFO << "E2E protection: CRC check failed for service: "
+                                    << std::hex << its_service << " method: " << its_method;
+                        }
+                    }
 #endif
-                            }
-                // GM - End
+                }
                 // ACL check SD message
                 if (!is_acl_message_allowed(_receiver, its_service, ANY_INSTANCE, _remote_address)) {
                     return;
