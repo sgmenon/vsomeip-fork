@@ -52,30 +52,25 @@ flowchart LR
   ep -->|"pin or one copy"| slice --> rm --> payload
 ```
 
-## Copy inventory (routing host, after this work)
+## Copy count by era
 
-| Stage                                      | Copies                     | Notes                                                         |
-| ------------------------------------------ | -------------------------- | ------------------------------------------------------------- |
-| UDP/TCP/UDS → service `on_message` (today) | **1×** full frame          | Endpoints still call `routing_host(byte*)`; RM does `copy_of` |
-| Stub SEND → service `on_message`           | **0×**                     | `owned_buffer_slice::slice` of IPC frame                      |
-| UDP → service `on_message` (target)        | **0×**                     | Pass datagram pin as `whole` / used-bytes `slice`             |
-| TCP/UDS → service `on_message` (target)    | **0×** or **1×**           | Exact-frame alloc (0× after read) or copy-out of stream       |
-| SOME/IP-TP reassemble                      | **1×** full                | Only when TP segments                                         |
-| E2E `check()`                              | **0×**                     | Spans into pinned / copied frame                              |
-| Host deliver                               | **0×** payload             | `payload_impl` views frame buffer                             |
-| Local forward after E2E                    | **0×** app; **16B** header | `compose_e2e_stripped_sequence(frame, …)`                     |
-| Proxy client deserialize                   | **+2–3×**                  | Open — see checklist                                          |
+Counts are **extra payload-sized copies after the socket/IPC fill**. Owned 16B
+E2E headers are noted separately, not as “1×”.
 
-### Totals (payload-sized, remote → hosting app on RM)
+Three columns only — do not mix stages across eras in one row:
 
-| Path               | Today (no endpoint pin) | Target (with pin / exact frame) |
-| ------------------ | ----------------------- | ------------------------------- |
-| Req/resp, no E2E   | **1×** (edge `copy_of`) | **0×**                          |
-| Req/resp, with E2E | **1×**                  | **0×**                          |
-| Event, with E2E    | **1×**                  | **0×** (+ shared filter)        |
-| Stub IPC → RM      | **0×**                  | **0×**                          |
+| Path | Before scatter / pin work | Now (required slice) | Target |
+| ---- | ------------------------- | -------------------- | ------ |
+| Network → hosting app (no E2E) | several (strip + deserialize + …) | **1×** (`copy_of` at `routing_host` → RM) | **0×** (UDP pin / TCP exact-frame) |
+| Network → hosting app (with E2E) | several more (materialize strip, …) | **1×** edge; then views | **0×** (+ shared filter) |
+| Network → other local (E2E strip forward) | full concat / materialize | **1×** edge; then **16B** hdr + app slice | **0×** edge; same **16B** + slice |
+| Stub IPC → RM | often already owned / varied | **0×** (`slice` of IPC frame) | **0×** |
+| SOME/IP-TP reassemble | **1×** full | **1×** full | **1×** until TP elision |
+| Proxy deserialize | **+2–3×** | **+2–3×** | open |
 
-After the edge owns an `owned_buffer_slice`, host/local paths are view/scatter only.
+**Now, network path in one sentence:** endpoints still pass `byte*` into
+`routing_host`; RM does one `copy_of`; after that, deliver / E2E / local forward
+only view or scatter. Stub already skips that edge copy.
 
 ## Design notes
 

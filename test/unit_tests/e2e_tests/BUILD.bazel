@@ -6,7 +6,7 @@ cc_test(
     name = "e2e_tests",
     srcs = glob(["*.cpp"]),
     deps = [
-        "//:vsomeip-core-lib",
+        "//:vsomeip",
         "//:vsomeip-e2e",
         "//test/unit_tests:test_main",
         "@googletest//:gtest",
