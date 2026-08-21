@@ -140,17 +140,16 @@ void logger_impl::log_to_dlt(level_e _level, std::string_view _msg) {
 #endif
 
 logger_impl* logger_impl::get() {
-    // Use flag set by a custom deleter as a safety check in case something tries to log during
-    // static deinitialization time, after logger is gone already. Should not happen, but one never
-    // knows... We don't expect any threads still running at this point, so no need to make this
-    // atomic.
-    static bool is_destroyed{false};
+    // Safety check if something logs during static deinitialization after the
+    // logger is gone. Prefer joining library threads on stop(); this is only a
+    // last-resort guard (atomic so a late reader cannot race the deleter write).
+    static std::atomic<bool> is_destroyed{false};
     static auto deleter = [](logger_impl* ptr) {
-        is_destroyed = true;
+        is_destroyed.store(true, std::memory_order_release);
         delete ptr;
     };
     static std::unique_ptr<logger_impl, decltype(deleter)> instance{new logger_impl, deleter};
-    return is_destroyed ? nullptr : instance.get();
+    return is_destroyed.load(std::memory_order_acquire) ? nullptr : instance.get();
 }
 
 } // namespace logger

@@ -50,13 +50,18 @@ endpoint_manager_impl::endpoint_manager_impl(routing_manager_base* const _rm, bo
 }
 
 endpoint_manager_impl::~endpoint_manager_impl() {
+    stop_multicast_option_processing();
+}
 
+void endpoint_manager_impl::stop_multicast_option_processing() {
     {
         std::lock_guard<std::mutex> its_guard(options_mutex_);
         is_processing_options_ = false;
         options_condition_.notify_one();
     }
-    options_thread_.join();
+    if (options_thread_.joinable()) {
+        options_thread_.join();
+    }
 }
 
 std::shared_ptr<endpoint> endpoint_manager_impl::find_or_create_remote_client(service_t _service, instance_t _instance, bool _reliable) {
@@ -1186,6 +1191,9 @@ void endpoint_manager_impl::log_server_states() const {
 void endpoint_manager_impl::add_multicast_option(const multicast_option_t& _option) {
 
     std::lock_guard<std::mutex> its_guard(options_mutex_);
+    if (!is_processing_options_) {
+        return;
+    }
     options_queue_.push(_option);
     options_condition_.notify_one();
 }

@@ -595,6 +595,12 @@ void routing_manager_impl::stop() {
             remove_local(client, true, false);
         }
     }
+
+    // Join m_multicast before application/logger teardown (static destruction
+    // order can otherwise destroy the logger while this thread still logs).
+    if (ep_mgr_impl_) {
+        ep_mgr_impl_->stop_multicast_option_processing();
+    }
 }
 
 bool routing_manager_impl::insert_offer_command(service_t _service, instance_t _instance, uint8_t _command, client_t _client,

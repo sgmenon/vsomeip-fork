@@ -80,6 +80,11 @@ public:
     // add join/leave options
     void add_multicast_option(const multicast_option_t& _option);
 
+    // Stop and join the multicast join/leave worker. Safe to call more than once;
+    // also invoked from the destructor. Call during routing stop so the thread
+    // cannot outlive application shutdown / logger teardown.
+    void stop_multicast_option_processing();
+
     void suspend();
     void resume();
 
