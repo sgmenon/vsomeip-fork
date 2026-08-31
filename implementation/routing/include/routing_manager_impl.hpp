@@ -134,8 +134,6 @@ public:
     void on_connect(const std::shared_ptr<endpoint>& _endpoint);
     void on_disconnect(const std::shared_ptr<endpoint>& _endpoint);
 
-    void on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
-                    const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port);
     void on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast = false,
                     client_t _bound_client = VSOMEIP_ROUTING_CLIENT, const vsomeip_sec_client_t* _sec_client = nullptr,
                     const boost::asio::ip::address& _remote_address = boost::asio::ip::address(),

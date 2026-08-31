@@ -637,15 +637,20 @@ void tcp_server_endpoint_impl::connection::receive_cbk(boost::system::error_code
                         }
                         if (!use_magic_cookies_) {
                             its_lock.unlock();
-                            its_host->on_message(&recv_buffer_[its_iteration_gap], current_message_size, its_server.get(), false,
-                                                 VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                            its_host->on_message(
+                                    owned_buffer_slice::whole(std::make_shared<message_buffer_t>(
+                                            &recv_buffer_[its_iteration_gap], &recv_buffer_[its_iteration_gap] + current_message_size)),
+                                    its_server.get(), false, VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                             its_lock.lock();
                         } else {
                             // Only call on_message without a magic cookie in front of the buffer!
                             if (!is_magic_cookie(its_iteration_gap)) {
                                 its_lock.unlock();
-                                its_host->on_message(&recv_buffer_[its_iteration_gap], current_message_size, its_server.get(), false,
-                                                     VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                                its_host->on_message(
+                                        owned_buffer_slice::whole(std::make_shared<message_buffer_t>(
+                                                &recv_buffer_[its_iteration_gap],
+                                                &recv_buffer_[its_iteration_gap] + current_message_size)),
+                                        its_server.get(), false, VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                                 its_lock.lock();
                             }
                         }
@@ -700,8 +705,11 @@ void tcp_server_endpoint_impl::connection::receive_cbk(boost::system::error_code
 
                             // ensure to send back a error message w/ wrong protocol version
                             its_lock.unlock();
-                            its_host->on_message(&recv_buffer_[its_iteration_gap], VSOMEIP_SOMEIP_HEADER_SIZE + 8, its_server.get(), false,
-                                                 VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                            its_host->on_message(
+                                    owned_buffer_slice::whole(std::make_shared<message_buffer_t>(
+                                            &recv_buffer_[its_iteration_gap],
+                                            &recv_buffer_[its_iteration_gap] + VSOMEIP_SOMEIP_HEADER_SIZE + 8)),
+                                    its_server.get(), false, VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                             its_lock.lock();
                         } else if (!utility::is_valid_message_type(
                                            static_cast<message_type_e>(recv_buffer_[its_iteration_gap + VSOMEIP_MESSAGE_TYPE_POS]))) {

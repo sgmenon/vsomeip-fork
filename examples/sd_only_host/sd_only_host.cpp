@@ -188,10 +188,10 @@ public:
     // set_on_message) — mirrors what routing_manager_impl::on_message does
     // for service id 0xFFFF in a full vsomeip app. SD parses and validates
     // the PDU itself.
-    void on_message(const v3::byte_t* data, v3::length_t length, v3::endpoint*, bool is_multicast, v3::client_t,
-                    const vsomeip_sec_client_t*, const boost::asio::ip::address& remote_address, std::uint16_t remote_port) override {
-        if (on_message_)
-            on_message_(data, length, is_multicast, remote_address, remote_port);
+    void on_message(v3::owned_buffer_slice frame, v3::endpoint*, bool is_multicast, v3::client_t, const vsomeip_sec_client_t*,
+                    const boost::asio::ip::address& remote_address, std::uint16_t remote_port) override {
+        if (on_message_ && frame.valid() && !frame.empty())
+            on_message_(frame.data(), static_cast<v3::length_t>(frame.length), is_multicast, remote_address, remote_port);
     }
     v3::client_t get_client() const override { return 0; }
     void add_known_client(v3::client_t, const std::string&) override {}

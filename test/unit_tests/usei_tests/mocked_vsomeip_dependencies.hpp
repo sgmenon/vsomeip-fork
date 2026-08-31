@@ -221,8 +221,8 @@ struct mock_endpoint_host : public vsomeip_v3::endpoint_host {
 };
 
 struct mock_routing_host : public vsomeip_v3::routing_host {
-    MOCK_METHOD8(on_message,
-                 void(const vsomeip_v3::byte_t* _data, vsomeip_v3::length_t _length, vsomeip_v3::endpoint* _receiver, bool _is_multicast,
+    MOCK_METHOD7(on_message,
+                 void(vsomeip_v3::owned_buffer_slice _frame, vsomeip_v3::endpoint* _receiver, bool _is_multicast,
                       vsomeip_v3::client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
                       const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port));
     MOCK_CONST_METHOD0(get_client, vsomeip_v3::client_t());

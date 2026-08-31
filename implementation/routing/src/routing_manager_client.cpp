@@ -962,20 +962,24 @@ void routing_manager_client::on_disconnect(const std::shared_ptr<endpoint>& _end
     host_->on_state(state_type_e::ST_DEREGISTERED);
 }
 
-void routing_manager_client::on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast,
-                                        client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
-                                        const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port) {
+void routing_manager_client::on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
+                                        const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address,
+                                        std::uint16_t _remote_port) {
 
     (void)_receiver;
     (void)_is_multicast;
     (void)_remote_address;
     (void)_remote_port;
 
+    if (!_frame.valid() || _frame.empty()) {
+        return;
+    }
+
 #if 0
     std::stringstream msg;
     msg << "rmc::on_message<" << std::hex << get_client() << ">: ";
-    for (length_t i = 0; i < _size; ++i)
-        msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(_data[i])) << " ";
+    for (length_t i = 0; i < _frame.length; ++i)
+        msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(_frame.data()[i])) << " ";
     VSOMEIP_INFO << msg.str();
 #endif
     protocol::id_e its_id;
@@ -992,7 +996,12 @@ void routing_manager_client::on_message(const byte_t* _data, length_t _size, end
 #ifndef VSOMEIP_DISABLE_SECURITY
     bool is_internal_policy_update(false);
 #endif // !VSOMEIP_DISABLE_SECURITY
-    std::vector<byte_t> its_buffer(_data, _data + _size);
+    std::vector<byte_t> its_buffer;
+    if (_frame.is_whole() && _frame.buffer.use_count() == 1) {
+        its_buffer = std::move(*_frame.buffer);
+    } else {
+        its_buffer.assign(_frame.data(), _frame.data() + _frame.length);
+    }
     protocol::error_e its_error;
 
     auto its_policy_manager = configuration_->get_policy_manager();
@@ -1181,7 +1190,7 @@ void routing_manager_client::on_message(const byte_t* _data, length_t _size, end
                             else
                                 its_message_size = 0;
 
-                            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, &_data[vsomeip_v3::protocol::SEND_COMMAND_HEADER_SIZE],
+                            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, &its_buffer[vsomeip_v3::protocol::SEND_COMMAND_HEADER_SIZE],
                                        its_message_size);
                         }
                     }
@@ -1209,7 +1218,7 @@ void routing_manager_client::on_message(const byte_t* _data, length_t _size, end
 
         case protocol::id_e::ROUTING_INFO_ID:
             if (!configuration_->is_security_enabled() || is_from_routing) {
-                on_routing_info(_data, _size);
+                on_routing_info(its_buffer.data(), static_cast<uint32_t>(its_buffer.size()));
             } else {
                 VSOMEIP_WARNING << "routing_manager_client::on_message: "
                                 << "Security: Client 0x" << std::hex << std::setfill('0') << std::setw(4) << get_client()
