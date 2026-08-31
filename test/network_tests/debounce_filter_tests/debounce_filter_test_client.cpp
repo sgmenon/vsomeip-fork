@@ -13,8 +13,9 @@
 static std::vector<std::vector<std::shared_ptr<vsomeip::payload>>> payloads__;
 
 debounce_test_client::debounce_test_client(int64_t _interval) :
-    interval(_interval), is_available_(false), runner_(std::bind(&debounce_test_client::run, this)),
-    app_(vsomeip::runtime::get()->create_application("debounce_test_client")), sum_time(0) { }
+    interval(_interval), is_available_(false),
+    app_(vsomeip::runtime::get()->create_application("debounce_test_client")),
+    runner_(std::bind(&debounce_test_client::run, this)), sum_time(0) { }
 
 bool debounce_test_client::init() {
     dBFilter.interval_ = interval;
