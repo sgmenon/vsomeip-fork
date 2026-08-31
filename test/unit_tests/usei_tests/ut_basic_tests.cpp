@@ -124,8 +124,8 @@ TEST_F(usei_fixture, basic) {
     auto received_future = received_promise.get_future();
 
     EXPECT_CALL(*routing_, on_message)
-            .WillOnce([&](const vsomeip_v3::byte_t*, vsomeip_v3::length_t, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
-                          const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) { received_promise.set_value(); });
+            .WillOnce([&](vsomeip_v3::owned_buffer_slice, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t, const vsomeip_sec_client_t*,
+                          const boost::asio::ip::address&, uint16_t) { received_promise.set_value(); });
 
     boost::system::error_code error;
     server_->init(unicast_parameters_, error);
@@ -156,9 +156,11 @@ TEST_F(usei_fixture, corrupted_data) {
 
     EXPECT_CALL(*endpoint_, on_error).Times(AtLeast(MESSAGE_SENT_COUNT / 20));
     EXPECT_CALL(*routing_, on_message)
-            .WillRepeatedly([&](const vsomeip_v3::byte_t* data, vsomeip_v3::length_t len, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
+            .WillRepeatedly([&](vsomeip_v3::owned_buffer_slice frame, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
                                 const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) {
-                if (len == 16 && data[0] == 0x1A && data[1] == 0x1B && data[2] == 0x1C && data[3] == 0x1D) {
+                const auto* data = frame.data();
+                const auto len = frame.length;
+                if (len == 16 && data && data[0] == 0x1A && data[1] == 0x1B && data[2] == 0x1C && data[3] == 0x1D) {
                     std::call_once(received_once, [&] { received_promise.set_value(); });
                 }
             });
@@ -188,8 +190,8 @@ TEST_F(usei_fixture, basic_multicast) {
     auto received_future = received_promise.get_future();
 
     EXPECT_CALL(*routing_, on_message)
-            .WillOnce([&](const vsomeip_v3::byte_t*, vsomeip_v3::length_t, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t,
-                          const vsomeip_sec_client_t*, const boost::asio::ip::address&, uint16_t) { received_promise.set_value(); });
+            .WillOnce([&](vsomeip_v3::owned_buffer_slice, vsomeip_v3::endpoint*, bool, vsomeip_v3::client_t, const vsomeip_sec_client_t*,
+                          const boost::asio::ip::address&, uint16_t) { received_promise.set_value(); });
 
     boost::system::error_code error;
     server_->init(unicast_parameters_, error);

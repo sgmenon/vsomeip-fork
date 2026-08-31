@@ -292,7 +292,10 @@ void local_uds_client_endpoint_impl::receive_cbk(boost::system::error_code const
 
             auto its_routing_host = routing_host_.lock();
             if (its_routing_host)
-                its_routing_host->on_message(&recv_buffer_[4], static_cast<length_t>(recv_buffer_.size() - 8), this);
+                its_routing_host->on_message(
+                        owned_buffer_slice::whole(std::make_shared<message_buffer_t>(
+                                &recv_buffer_[4], &recv_buffer_[4] + (recv_buffer_.size() - 8))),
+                        this);
         }
 
         receive();

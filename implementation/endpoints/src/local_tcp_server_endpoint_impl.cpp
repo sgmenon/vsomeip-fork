@@ -728,8 +728,10 @@ void local_tcp_server_endpoint_impl::connection::receive_cbk(boost::system::erro
                             its_server->add_connection(its_client, shared_from_this());
                         }
 
-                        its_host->on_message(&recv_buffer_[its_start], uint32_t(its_end - its_start), its_server.get(), false,
-                                             bound_client_, &sec_client_, its_address, its_port);
+                        its_host->on_message(
+                                owned_buffer_slice::whole(std::make_shared<message_buffer_t>(
+                                        &recv_buffer_[its_start], &recv_buffer_[its_start] + (its_end - its_start))),
+                                its_server.get(), false, bound_client_, &sec_client_, its_address, its_port);
                     } else {
                         VSOMEIP_WARNING << std::hex << "Client 0x" << its_host->get_client() << " endpoint encountered an error["
                                         << ec.value() << "]: " << ec.message() << " endpoint > " << this;

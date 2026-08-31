@@ -8,9 +8,9 @@
 > **Ownership rule (routing ingress):** crossing into service-level routing
 > receive always takes a required `owned_buffer_slice` (non-null buffer +
 > explicit offset/length). Same spirit as send’s required `message_buffer_ptr_t`.
-> No `const byte_t*` + optional `_pin = nullptr` on the RM data-plane path.
-> Copies, if any, happen at the endpoint/stub edge (`copy_of` or `slice` of an
-> existing pin).
+> No `const byte_t*` on the RM data-plane path.
+> Copies, if any, happen at the endpoint edge (`copy_of` / copy-out, or `slice`
+> of an existing pin).
 
 ## Problem
 
@@ -59,27 +59,35 @@ E2E headers are noted separately, not as “1×”.
 
 Three columns only — do not mix stages across eras in one row:
 
-| Path | Before scatter / pin work | Now (required slice) | Target |
-| ---- | ------------------------- | -------------------- | ------ |
-| Network → hosting app (no E2E) | several (strip + deserialize + …) | **1×** (`copy_of` at `routing_host` → RM) | **0×** (UDP pin / TCP exact-frame) |
-| Network → hosting app (with E2E) | several more (materialize strip, …) | **1×** edge; then views | **0×** (+ shared filter) |
-| Network → other local (E2E strip forward) | full concat / materialize | **1×** edge; then **16B** hdr + app slice | **0×** edge; same **16B** + slice |
-| Stub IPC → RM | often already owned / varied | **0×** (`slice` of IPC frame) | **0×** |
-| SOME/IP-TP reassemble | **1×** full | **1×** full | **1×** until TP elision |
-| Proxy deserialize | **+2–3×** | **+2–3×** | open |
+| Path                                      | Before scatter / pin work           | Now (required slice)                                                                  | Target                                 |
+| ----------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------- | -------------------------------------- |
+| UDP → hosting app (no E2E)                | several (strip + deserialize + …)   | **0×** (datagram pin via `slice`/`whole`)                                             | **0×**                                 |
+| TCP → hosting app (no E2E)                | several                             | **0×** when frame fills window (`gap == 0`); else **1×** copy-out; pool drop if empty | **0×** (assemble-into-lease)           |
+| Local UDS/TCP IPC → stub                  | several                             | **1×** (copy-out of complete **command**; stub moves when unique)                     | **0×** (optional move of whole window) |
+| Network → hosting app (with E2E)          | several more (materialize strip, …) | UDP **0×** / TCP **0×** if fill else **1×**; then views                               | **0×** (+ shared filter)               |
+| Network → other local (E2E strip forward) | full concat / materialize           | same edge as above; then **16B** hdr + app slice                                      | **0×** edge; same **16B** + slice      |
+| Stub SEND → RM                            | often already owned / varied        | **0×** (`slice` of IPC frame)                                                         | **0×**                                 |
+| SOME/IP-TP reassemble                     | **1×** full                         | **1×** full                                                                           | **1×** until TP elision                |
+| Proxy receive (RM → app)                  | **+2–3×** after IPC fill            | **1×** edge; then **0×** (`build_message_from_buffer` pin)                            | **0×** (optional move of whole window) |
 
-**Now, network path in one sentence:** endpoints still pass `byte*` into
-`routing_host`; RM does one `copy_of`; after that, deliver / E2E / local forward
-only view or scatter. Stub already skips that edge copy.
+**Now, in one sentence:** All routing ingress uses
+`routing_host::on_message(owned_buffer_slice)`. UDP pins the datagram
+`shared_ptr`. Remote TCP uses `take_stream_frame` + `message_buffer_pool`
+(LIFO lease/adopt; drop when empty — no fallback alloc under stall). Move when a
+complete frame fills the used region at offset 0; otherwise pooled copy-out.
+Local stream servers still copy-out each complete command (compaction
+unchanged). After the edge owns a slice, deliver / E2E / local forward /
+proxy SEND receive only view or pin.
 
 ## Design notes
 
 ### Lifetime
 
-`routing_host::on_message(const byte_t*, …)` pointers stay valid only until the
-next receive reuse. After `copy_of` / `slice`, the `owned_buffer_slice` (and
-any `payload_impl` / `buffer_sequence` built from it) keep the buffer alive
-until handlers / async local writes complete.
+`routing_host::on_message(owned_buffer_slice, …)` keeps the frame buffer alive
+for the duration of processing and any `payload_impl` / `buffer_sequence`
+built from it. Stream endpoints do **not** pin into a still-active compaction
+window — they `take_stream_frame` (move when `gap == 0` and the frame fills
+used bytes; else copy-out) before any leftover memmove.
 
 ### Deliver without full-frame deserialize
 
@@ -96,14 +104,18 @@ subscribers get `send_local(sequence)`.
 
 1. Stub SEND: slice of IPC SOME/IP region (done).
 2. RM internal forwards / deliver: consume slice only (done).
-3. UDP: pass datagram `message_buffer_ptr_t` as `whole(recv_buf)` (next).
-4. TCP/UDS: exact-frame alloc after 16B length parse, or one copy out of the
-   stream window (avoids compaction invalidation) — open until then.
+3. UDP: pass datagram pin as `whole` / used-bytes `slice` (done; server no longer
+   recycles the recv buffer).
+4. TCP/UDS: remote TCP uses `take_stream_frame` (move when frame fills used
+   window at gap 0; else copy-out). Local UDS/TCP still copy-out commands.
+   `routing_host` byte\* + RM `copy_of` adapter retired.
 
-### Proxy path (open)
+### Proxy path
 
-Non-routing apps still copy on IPC receive + `send_command` + deserialize.
-Scatter send already works; receive elision is separate.
+Non-routing apps (`routing_manager_client`) receive SEND over local IPC, parse
+the command header in place, and pin the SOME/IP region with
+`build_message_from_buffer` (**0×** after the stream edge copy-out). Notifications
+to the proxy arrive as `SEND_ID` with notification message type on the same path.
 
 ## Implementation checklist
 
@@ -112,24 +124,29 @@ Scatter send already works; receive elision is separate.
 - [x] Required `owned_buffer_slice` at service-level routing ingress
 - [x] Unified slice type for receive and `buffer_sequence` segments
 - [x] Stub SEND: `slice` of IPC frame (**0×** on that path)
-- [x] Network interim: `routing_host(byte*)` → `copy_of` into RM (**1×** until endpoints pin)
 - [x] Host deliver / notify / E2E strip: views + scatter only (no extra payload copies after the edge owns a slice)
 - [x] `payload_impl` view-only; unit tests for payload pin + e2e protect
 
-### Remaining — toward network **0×** target
+### Done — network / local edge
 
-- [ ] **UDP:** pass datagram recv `shared_ptr` as `whole` / used-bytes `slice` (drops the edge `copy_of`)
-- [ ] **TCP/UDS:** exact-frame alloc after 16B length parse (preferred), or copy one message out of the stream window — do **not** pin into a buffer that compaction can move
-- [ ] Prefer `on_message(owned_buffer_slice, endpoint*, …)` at `routing_host`; retire byte\* + `copy_of` once endpoints are plumbed
-- [ ] Network / integration coverage for E2E check + strip-by-span with a real pin
+- [x] **UDP:** pass datagram recv `shared_ptr` as `whole` / used-bytes `slice`
+- [x] `routing_host::on_message(owned_buffer_slice, …)` only (byte\* + `copy_of` adapter retired)
+- [x] **TCP:** `take_stream_frame` + `message_buffer_pool` (move when `gap == 0`
+      fills used region; else copy-out; **drop** when pool empty)
+- [x] **Local UDS/TCP:** copy-out complete command (tags stripped) → stub slice path (move when unique)
+- [x] **Integration:** E2E check + strip-by-span with a real `owned_buffer_slice` pin
+      (`ut_check_strip_pin` — spans / `payload_impl` / stripped sequence share the frame buffer;
+      docker `e2e_*` remains wire CRC smoke only)
+- [x] Public `application` / `message` / `payload` APIs unchanged (handlers still get `shared_ptr<message>`; payload may view a pin)
+- [x] Proxy / routing-client SEND receive: header-only parse + `payload_impl` pin (notifications via same `SEND_ID`)
 
 ### Later / separate tracks
 
-- [ ] Proxy / routing-client deserialize elision
 - [ ] SOME/IP-TP reassembly without full flatten
-- [ ] Sync receive notes in [`e2e-scatter-gather-send.md`](e2e-scatter-gather-send.md)
-- [ ] SD `on_message` (stays `byte*` until SD needs it)
-- [ ] Public `application` / `message` APIs unchanged by design
+- [x] Optional TCP micro-opt: move whole stream buffer when `gap == 0` and size == full used region (`take_stream_frame`)
+- [x] TCP `message_buffer_pool` (LIFO recycle; config `tcp-receive-buffer-pool-size`; drop when empty)
+- [ ] Optional UDS micro-opt: same move-whole-window for local stream commands
+- [ ] SD `on_message` → `owned_buffer_slice` (deferred; still `byte*` — RM passes pin bytes into SD today)
 
 ## Related docs
 

@@ -17,10 +17,23 @@
 #include "../include/endpoint_host.hpp"
 #include "../../routing/include/routing_host.hpp"
 #include "../include/tcp_client_endpoint_impl.hpp"
+#include "../include/message_buffer_pool.hpp"
 #include "../../utility/include/utility.hpp"
 #include "../../utility/include/bithelper.hpp"
 
 namespace vsomeip_v3 {
+namespace {
+
+message_buffer_ptr_t make_pooled_or_fresh(const std::shared_ptr<message_buffer_pool>& _pool, std::size_t _capacity) {
+    if (_pool) {
+        if (auto leased = _pool->try_lease(_capacity)) {
+            return leased;
+        }
+    }
+    return std::make_shared<message_buffer_t>(_capacity, byte_t{0});
+}
+
+} // namespace
 
 tcp_client_endpoint_impl::tcp_client_endpoint_impl(const std::shared_ptr<endpoint_host>& _endpoint_host,
                                                    const std::shared_ptr<routing_host>& _routing_host, const endpoint_type& _local,
@@ -28,7 +41,15 @@ tcp_client_endpoint_impl::tcp_client_endpoint_impl(const std::shared_ptr<endpoin
                                                    const std::shared_ptr<configuration>& _configuration, bool _use_magic_cookies) :
     tcp_client_endpoint_base_impl(_endpoint_host, _routing_host, _local, _remote, _io, _configuration),
     use_magic_cookies_(_use_magic_cookies), last_cookie_sent_(std::chrono::steady_clock::now() - std::chrono::seconds(11)),
-    recv_buffer_size_initial_(VSOMEIP_SOMEIP_HEADER_SIZE), recv_buffer_(std::make_shared<message_buffer_t>(recv_buffer_size_initial_, 0)),
+    recv_buffer_size_initial_(VSOMEIP_SOMEIP_HEADER_SIZE),
+    recv_buffer_pool_([_configuration]() -> std::shared_ptr<message_buffer_pool> {
+        const auto depth = _configuration->get_tcp_receive_buffer_pool_size();
+        if (depth == 0) {
+            return nullptr;
+        }
+        return message_buffer_pool::create(depth, VSOMEIP_SOMEIP_HEADER_SIZE);
+    }()),
+    recv_buffer_(make_pooled_or_fresh(recv_buffer_pool_, recv_buffer_size_initial_)),
     shrink_count_(0), buffer_shrink_threshold_(configuration_->get_buffer_shrink_threshold()), remote_address_(_remote.address()),
     remote_port_(_remote.port()),
     // send timeout after 2/3 of configured ttl, warning after 1/3
@@ -80,7 +101,7 @@ void tcp_client_endpoint_impl::restart(bool _force) {
             std::scoped_lock its_lock{self->socket_mutex_};
             address_port_local = self->get_address_port_local();
             self->shutdown_and_close_socket_unlocked(true);
-            self->recv_buffer_ = std::make_shared<message_buffer_t>(self->recv_buffer_size_initial_, 0);
+            self->recv_buffer_ = make_pooled_or_fresh(self->recv_buffer_pool_, self->recv_buffer_size_initial_);
         }
         self->state_ = cei_state_e::CONNECTING;
         self->was_not_connected_ = true;
@@ -497,25 +518,38 @@ void tcp_client_endpoint_impl::receive_cbk(boost::system::error_code const& _err
                             }
                         }
                     }
+                    bool frame_moved = false;
                     if (needs_forwarding) {
                         if (!use_magic_cookies_) {
-                            its_lock.unlock();
-                            its_host->on_message(&(*_recv_buffer)[its_iteration_gap], current_message_size, this, false,
-                                                 VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
-                            its_lock.lock();
+                            auto its_frame = take_stream_frame(*_recv_buffer, _recv_buffer_size, its_iteration_gap,
+                                                              current_message_size, recv_buffer_size_initial_, frame_moved,
+                                                              recv_buffer_pool_);
+                            if (its_frame) {
+                                its_lock.unlock();
+                                its_host->on_message(owned_buffer_slice::whole(std::move(its_frame)), this, false,
+                                                     VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                                its_lock.lock();
+                            }
                         } else {
                             // Only call on_message without a magic cookie in front of the buffer!
                             if (!is_magic_cookie(_recv_buffer, its_iteration_gap)) {
-                                its_lock.unlock();
-                                its_host->on_message(&(*_recv_buffer)[its_iteration_gap], current_message_size, this, false,
-                                                     VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
-                                its_lock.lock();
+                                auto its_frame = take_stream_frame(*_recv_buffer, _recv_buffer_size, its_iteration_gap,
+                                                                  current_message_size, recv_buffer_size_initial_,
+                                                                  frame_moved, recv_buffer_pool_);
+                                if (its_frame) {
+                                    its_lock.unlock();
+                                    its_host->on_message(owned_buffer_slice::whole(std::move(its_frame)), this, false,
+                                                         VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                                    its_lock.lock();
+                                }
                             }
                         }
                     }
                     calculate_shrink_count(_recv_buffer, _recv_buffer_size);
-                    _recv_buffer_size -= current_message_size;
-                    its_iteration_gap += current_message_size;
+                    if (!frame_moved) {
+                        _recv_buffer_size -= current_message_size;
+                        its_iteration_gap += current_message_size;
+                    }
                     its_missing_capacity = 0;
                 } else if (use_magic_cookies_ && _recv_buffer_size > 0) {
                     const uint32_t its_offset = find_magic_cookie(&(*_recv_buffer)[its_iteration_gap], _recv_buffer_size);
@@ -546,8 +580,11 @@ void tcp_client_endpoint_impl::receive_cbk(boost::system::error_code const& _err
                                           << " local: " << get_address_port_local() << " remote: " << get_address_port_remote();
                             // ensure to send back a message w/ wrong protocol version
                             its_lock.unlock();
-                            its_host->on_message(&(*_recv_buffer)[its_iteration_gap], VSOMEIP_SOMEIP_HEADER_SIZE + 8, this, false,
-                                                 VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                            its_host->on_message(
+                                    owned_buffer_slice::whole(std::make_shared<message_buffer_t>(
+                                            &(*_recv_buffer)[its_iteration_gap],
+                                            &(*_recv_buffer)[its_iteration_gap] + VSOMEIP_SOMEIP_HEADER_SIZE + 8)),
+                                    this, false, VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                             its_lock.lock();
                         } else if (!utility::is_valid_message_type(
                                            static_cast<message_type_e>((*recv_buffer_)[its_iteration_gap + VSOMEIP_MESSAGE_TYPE_POS]))) {

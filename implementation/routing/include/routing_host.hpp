@@ -13,6 +13,8 @@
 #include <vsomeip/primitive_types.hpp>
 #include <vsomeip/vsomeip_sec.h>
 
+#include "../../endpoints/include/buffer.hpp"
+
 #ifdef ANDROID
 #include "../../configuration/include/internal_android.hpp"
 #else
@@ -27,7 +29,8 @@ class routing_host {
 public:
     virtual ~routing_host() = default;
 
-    virtual void on_message(const byte_t* _data, length_t _length, endpoint* _receiver, bool _is_multicast = false,
+    // Ingress when the caller owns a pin (UDP datagram, exact TCP/UDS frame).
+    virtual void on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast = false,
                             client_t _bound_client = VSOMEIP_ROUTING_CLIENT, const vsomeip_sec_client_t* _sec_client = nullptr,
                             const boost::asio::ip::address& _remote_address = boost::asio::ip::address(),
                             std::uint16_t _remote_port = 0) = 0;

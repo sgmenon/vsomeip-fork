@@ -32,6 +32,7 @@
 #include "../include/routing_manager_host.hpp"
 #include "../include/routing_manager_impl.hpp"
 #include "../include/payload_ownership.hpp"
+#include "../include/e2e_receive_helpers.hpp"
 #include "../include/routing_manager_stub.hpp"
 #include "../include/serviceinfo.hpp"
 #include "../../configuration/include/configuration.hpp"
@@ -229,66 +230,10 @@ buffer_sequence_ptr_t build_send_sequence_from_message(const std::shared_ptr<e2e
     return its_sequence;
 }
 
-/**
- * Hole-free SOME/IP as scatter: owned 16B header (length patched) + app payload
- * slice (pin when possible). No header+payload concat.
- */
-buffer_sequence_ptr_t compose_e2e_stripped_sequence(const owned_buffer_slice& _frame, const e2e::check_result& _checked) {
-    if (!_frame.valid() || _frame.length < VSOMEIP_FULL_HEADER_SIZE) {
-        return nullptr;
-    }
-
-    const byte_t* _data = _frame.data();
-    auto its_header = std::make_shared<message_buffer_t>(_data, _data + VSOMEIP_FULL_HEADER_SIZE);
-    const uint32_t its_new_total = static_cast<uint32_t>(VSOMEIP_FULL_HEADER_SIZE + _checked.app_payload.size());
-    bithelper::write_uint32_be(its_new_total - 8U, its_header->data() + VSOMEIP_LENGTH_POS_MIN);
-
-    auto its_sequence = std::make_shared<buffer_sequence>();
-    its_sequence->append(std::move(its_header));
-
-    if (_checked.app_payload.empty()) {
-        return its_sequence;
-    }
-
-    const byte_t* its_app = _checked.app_payload.data();
-    const std::size_t its_app_len = _checked.app_payload.size();
-    if (its_app >= _frame.buffer->data() && (its_app + its_app_len) <= (_frame.buffer->data() + _frame.buffer->size())) {
-        const std::size_t its_offset = static_cast<std::size_t>(its_app - _frame.buffer->data());
-        its_sequence->append_buffer_slice(_frame.buffer, its_offset, its_app_len);
-    } else {
-        its_sequence->append_bytes(its_app, its_app_len);
-    }
-    return its_sequence;
-}
-
 } // namespace
 #endif
 
 namespace {
-
-std::shared_ptr<payload> make_payload_from_frame(const owned_buffer_slice& _frame, std::size_t _rel_offset, std::size_t _length) {
-    if (_length == 0) {
-        return runtime::get()->create_payload();
-    }
-    if (!_frame.valid() || _rel_offset + _length > _frame.length) {
-        return runtime::get()->create_payload();
-    }
-    return std::make_shared<payload_impl>(_frame.buffer, _frame.offset + _rel_offset, _length);
-}
-
-#ifndef ANDROID
-std::shared_ptr<payload> make_payload_from_span(span<const uint8_t> _span, const owned_buffer_slice& _frame) {
-    if (_span.empty()) {
-        return runtime::get()->create_payload();
-    }
-    if (_frame.valid() && _span.data() >= _frame.buffer->data()
-        && (_span.data() + _span.size()) <= (_frame.buffer->data() + _frame.buffer->size())) {
-        const std::size_t its_offset = static_cast<std::size_t>(_span.data() - _frame.buffer->data());
-        return std::make_shared<payload_impl>(_frame.buffer, its_offset, _span.size());
-    }
-    return runtime::get()->create_payload(_span.data(), static_cast<length_t>(_span.size()));
-}
-#endif
 
 buffer_sequence_ptr_t compose_unprotected_forward_sequence(const owned_buffer_slice& _frame) {
     if (!_frame.valid() || _frame.empty()) {
@@ -304,45 +249,6 @@ buffer_sequence_ptr_t compose_unprotected_forward_sequence(const owned_buffer_sl
     }
     return its_sequence;
 }
-
-std::shared_ptr<message_impl> build_message_from_header_and_payload(const byte_t* _header, std::shared_ptr<payload> _payload) {
-    if (!_header) {
-        return nullptr;
-    }
-    auto its_message = std::make_shared<message_impl>();
-    its_message->set_service(bithelper::read_uint16_be(&_header[VSOMEIP_SERVICE_POS_MIN]));
-    its_message->set_method(bithelper::read_uint16_be(&_header[VSOMEIP_METHOD_POS_MIN]));
-    its_message->set_client(bithelper::read_uint16_be(&_header[VSOMEIP_CLIENT_POS_MIN]));
-    its_message->set_session(bithelper::read_uint16_be(&_header[VSOMEIP_SESSION_POS_MIN]));
-    its_message->set_protocol_version(_header[VSOMEIP_PROTOCOL_VERSION_POS]);
-    its_message->set_interface_version(_header[VSOMEIP_INTERFACE_VERSION_POS]);
-    its_message->set_message_type(static_cast<message_type_e>(_header[VSOMEIP_MESSAGE_TYPE_POS]));
-    its_message->set_return_code(static_cast<return_code_e>(_header[VSOMEIP_RETURN_CODE_POS]));
-    if (_payload) {
-        its_message->set_payload(std::move(_payload));
-    }
-    return its_message;
-}
-
-std::shared_ptr<message_impl> build_message_from_buffer(const owned_buffer_slice& _frame) {
-    if (!_frame.valid() || _frame.length < VSOMEIP_FULL_HEADER_SIZE) {
-        return nullptr;
-    }
-    const length_t its_payload_length =
-            (_frame.length > VSOMEIP_FULL_HEADER_SIZE) ? static_cast<length_t>(_frame.length - VSOMEIP_FULL_HEADER_SIZE) : 0;
-    auto its_payload = make_payload_from_frame(_frame, VSOMEIP_FULL_HEADER_SIZE, its_payload_length);
-    return build_message_from_header_and_payload(_frame.data(), std::move(its_payload));
-}
-
-#ifndef ANDROID
-std::shared_ptr<message_impl> build_message_from_check_result(const owned_buffer_slice& _frame, const e2e::check_result& _checked) {
-    if (!_frame.valid() || _frame.length < VSOMEIP_FULL_HEADER_SIZE) {
-        return nullptr;
-    }
-    auto its_payload = make_payload_from_span(_checked.app_payload, _frame);
-    return build_message_from_header_and_payload(_frame.data(), std::move(its_payload));
-}
-#endif
 
 } // namespace
 
@@ -1816,18 +1722,19 @@ bool routing_manager_impl::stop_offer_service_remotely(service_t _service, insta
     return ret;
 }
 
-void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
+void routing_manager_impl::on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
                                       const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address,
                                       std::uint16_t _remote_port) {
     (void)_bound_client;
+    if (!_frame.valid() || _frame.length < VSOMEIP_FULL_HEADER_SIZE) {
+        VSOMEIP_ERROR << "Dropped message with invalid size " << (_frame.valid() ? _frame.length : 0);
+        return;
+    }
+    const byte_t* _data = _frame.data();
+    const length_t _size = static_cast<length_t>(_frame.length);
     uint8_t its_check_status = e2e::profile_interface::generic_check_status::E2E_OK;
     instance_t its_instance(0x0);
     bool is_forwarded(true);
-    // message is at least 16-bytes, see also PRS_SOMEIP_00910
-    if (_size < VSOMEIP_FULL_HEADER_SIZE) {
-        VSOMEIP_ERROR << "Dropped message with invalid size " << _size;
-        return;
-    }
 
     const message_type_e its_message_type = static_cast<message_type_e>(_data[VSOMEIP_MESSAGE_TYPE_POS]);
     const service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
@@ -1949,12 +1856,11 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
 
         // Common way of message handling
 #ifndef ANDROID
-        is_forwarded = on_message_checked(its_service, its_instance, owned_buffer_slice::copy_of(_data, _size), _receiver->is_reliable(),
-                                          _bound_client, _sec_client, its_check_status, true,
-                                          its_e2e_checked_valid ? &its_e2e_checked : nullptr);
+        is_forwarded = on_message_checked(its_service, its_instance, std::move(_frame), _receiver->is_reliable(), _bound_client,
+                                          _sec_client, its_check_status, true, its_e2e_checked_valid ? &its_e2e_checked : nullptr);
 #else
-        is_forwarded = on_message(its_service, its_instance, owned_buffer_slice::copy_of(_data, _size), _receiver->is_reliable(),
-                                  _bound_client, _sec_client, its_check_status, true);
+        is_forwarded = on_message(its_service, its_instance, std::move(_frame), _receiver->is_reliable(), _bound_client, _sec_client,
+                                  its_check_status, true);
 #endif
     }
 

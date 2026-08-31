@@ -8,8 +8,9 @@
 #include "debounce_filter_test_service.hpp"
 
 debounce_test_service::debounce_test_service() :
-    is_running_(true), runner_(std::bind(&debounce_test_service::run, this)),
-    app_(vsomeip::runtime::get()->create_application("debounce_test_service")) { }
+    is_running_(true),
+    app_(vsomeip::runtime::get()->create_application("debounce_test_service")),
+    runner_(std::bind(&debounce_test_service::run, this)) { }
 
 bool debounce_test_service::init() {
     bool is_initialized = app_->init();

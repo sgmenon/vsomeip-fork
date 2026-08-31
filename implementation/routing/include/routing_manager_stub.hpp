@@ -46,8 +46,9 @@ public:
     void start();
     void stop();
 
-    void on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
-                    const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port);
+    void on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast = false, client_t _bound_client = VSOMEIP_ROUTING_CLIENT,
+                    const vsomeip_sec_client_t* _sec_client = nullptr,
+                    const boost::asio::ip::address& _remote_address = boost::asio::ip::address(), std::uint16_t _remote_port = 0) override;
 
     void on_offer_service(client_t _client, service_t _service, instance_t _instance, major_version_t _major, minor_version_t _minor);
     void on_stop_offer_service(client_t _client, service_t _service, instance_t _instance, major_version_t _major, minor_version_t _minor);
@@ -190,6 +191,9 @@ private:
 
     void add_pending_security_update_handler(pending_security_update_id_t _id, const security_update_handler_t& _handler);
     void add_pending_security_update_timer(pending_security_update_id_t _id);
+
+    void on_message(std::vector<byte_t>&& _buffer, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
+                    const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port);
 
 private:
     routing_manager_stub_host* host_;

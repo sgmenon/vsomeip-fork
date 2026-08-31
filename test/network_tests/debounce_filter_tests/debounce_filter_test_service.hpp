@@ -38,8 +38,10 @@ private:
     std::condition_variable run_condition_;
 
     std::atomic<bool> is_running_;
-    std::thread runner_;
+    // app_ before runner_: thread starts immediately; run() must not see an
+    // uninitialized application shared_ptr (TSan race under THREAD sanitizer).
     std::shared_ptr<vsomeip::application> app_;
+    std::thread runner_;
 };
 
 #endif // DEBOUNCE_TEST_SERVICE_HPP_

@@ -13,8 +13,9 @@
 static std::vector<std::vector<std::shared_ptr<vsomeip::payload>>> payloads__;
 
 debounce_test_client::debounce_test_client(debounce_test_id_e _test_id) :
-    test_id_(_test_id), index_(0), is_available_(false), runner_(std::bind(&debounce_test_client::run, this)),
-    app_(vsomeip::runtime::get()->create_application("debounce_test_client")) { }
+    test_id_(_test_id), index_(0), is_available_(false),
+    app_(vsomeip::runtime::get()->create_application("debounce_test_client")),
+    runner_(std::bind(&debounce_test_client::run, this)) { }
 
 bool debounce_test_client::init() {
 

@@ -29,7 +29,7 @@ namespace udp_endpoint_receive_op {
 using socket_type_t = boost::asio::ip::udp::socket;
 using endpoint_type_t = boost::asio::ip::udp::endpoint;
 using receive_handler_t = std::function<void(boost::system::error_code const&, size_t, const boost::asio::ip::udp::endpoint&,
-                                             const boost::asio::ip::address&, message_buffer_t const&)>;
+                                             const boost::asio::ip::address&, const message_buffer_ptr_t&)>;
 
 struct storage : public std::enable_shared_from_this<storage> {
     std::weak_ptr<socket_type_t> socket_;
@@ -295,7 +295,7 @@ struct storage : public std::enable_shared_from_this<storage> {
         }
 
         // Call the handler
-        _data->handler_(_error_code, _data->bytes_, sender, _data->destination_, *(_data->multicast_recv_buffer_));
+        _data->handler_(_error_code, _data->bytes_, sender, _data->destination_, _data->multicast_recv_buffer_);
         return false;
     }
 };

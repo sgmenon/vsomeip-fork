@@ -13,8 +13,9 @@
 static std::vector<std::shared_ptr<vsomeip::payload>> payloads__;
 
 debounce_test_client::debounce_test_client(int64_t _interval) :
-    interval(_interval), index_(0), is_available_(false), messagesReceived_(false), runner_(std::bind(&debounce_test_client::run, this)),
-    app_(vsomeip::runtime::get()->create_application("debounce_timeout_test_client")) { }
+    interval(_interval), index_(0), is_available_(false), messagesReceived_(false),
+    app_(vsomeip::runtime::get()->create_application("debounce_timeout_test_client")),
+    runner_(std::bind(&debounce_test_client::run, this)) { }
 
 bool debounce_test_client::init() {
 

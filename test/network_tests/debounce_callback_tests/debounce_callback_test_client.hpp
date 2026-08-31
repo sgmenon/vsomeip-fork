@@ -52,8 +52,9 @@ private:
     std::mutex run_mutex_;
     std::condition_variable run_condition_;
 
-    std::thread runner_;
+    // app_ before runner_: thread starts immediately; see service.hpp comment.
     std::shared_ptr<vsomeip::application> app_;
+    std::thread runner_;
 };
 
 #endif // DEBOUNCE_CALLBACK_TEST_CLIENT_HPP_

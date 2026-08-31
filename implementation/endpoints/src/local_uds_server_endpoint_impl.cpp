@@ -690,8 +690,10 @@ void local_uds_server_endpoint_impl::connection::receive_cbk(boost::system::erro
                     its_sec_client.user = _uid;
                     its_sec_client.group = _gid;
 
-                    its_host->on_message(&recv_buffer_[its_start], uint32_t(its_end - its_start), its_server.get(), false, bound_client_,
-                                         &its_sec_client);
+                    its_host->on_message(
+                            owned_buffer_slice::whole(std::make_shared<message_buffer_t>(&recv_buffer_[its_start],
+                                                                                        &recv_buffer_[its_start] + (its_end - its_start))),
+                            its_server.get(), false, bound_client_, &its_sec_client);
                 } else {
                     VSOMEIP_WARNING << std::hex << "Client 0x" << its_host->get_client()
                                     << " didn't receive VSOMEIP_ASSIGN_CLIENT as first message";

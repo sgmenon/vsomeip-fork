@@ -167,22 +167,28 @@ void routing_manager_stub::stop() {
     }
 }
 
-void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
+void routing_manager_stub::on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
                                       const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address,
                                       std::uint16_t _remote_port) {
 
     (void)_receiver;
     (void)_is_multicast;
-    (void)_remote_address;
-    (void)_remote_port;
-#if 0
-    std::stringstream msg;
-    msg << "rms::on_message: ";
-    for (length_t i = 0; i < _size; ++i)
-        msg << std::hex << std::setfill('0') << std::setw(2) << static_cast<int>(_data[i]) << " ";
-    VSOMEIP_INFO << msg.str();
-#endif
+    if (!_frame.valid() || _frame.empty()) {
+        return;
+    }
 
+    // Prefer move when the endpoint copy-out is uniquely owned (no second copy).
+    std::vector<byte_t> its_buffer;
+    if (_frame.is_whole() && _frame.buffer.use_count() == 1) {
+        its_buffer = std::move(*_frame.buffer);
+    } else {
+        its_buffer.assign(_frame.data(), _frame.data() + _frame.length);
+    }
+    on_message(std::move(its_buffer), _bound_client, _sec_client, _remote_address, _remote_port);
+}
+
+void routing_manager_stub::on_message(std::vector<byte_t>&& _buffer, client_t _bound_client, const vsomeip_sec_client_t* _sec_client,
+                                      const boost::asio::ip::address& _remote_address, std::uint16_t _remote_port) {
     client_t its_client;
     protocol::id_e its_id;
     std::string its_client_endpoint;
@@ -199,7 +205,7 @@ void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpo
     uint8_t its_check_status(0);
     std::uint16_t its_subscription_id(PENDING_SUBSCRIPTION_ID);
 
-    std::vector<byte_t> its_buffer(_data, _data + _size);
+    std::vector<byte_t> its_buffer(std::move(_buffer));
     protocol::error_e its_error;
 
     // Use dummy command to deserialize id and client.
@@ -436,12 +442,11 @@ void routing_manager_stub::on_message(const byte_t* _data, length_t _size, endpo
     }
 
     case protocol::id_e::SEND_ID: {
+        // Keep the IPC frame alive and pin SOME/IP header/payload slices for remote send.
+        auto its_frame = std::make_shared<message_buffer_t>(std::move(its_buffer));
         protocol::send_command its_command(its_id);
-        its_command.deserialize(its_buffer, its_error);
+        its_command.deserialize_header(*its_frame, its_error);
         if (its_error == protocol::error_e::ERROR_OK) {
-
-            // Keep the IPC frame alive and pin SOME/IP header/payload slices for remote send.
-            auto its_frame = std::make_shared<message_buffer_t>(std::move(its_buffer));
             if (its_frame->size() <= protocol::SEND_COMMAND_HEADER_SIZE + VSOMEIP_MESSAGE_TYPE_POS) {
                 break;
             }
