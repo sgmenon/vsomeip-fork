@@ -97,13 +97,14 @@ private:
     std::string get_address_port_local_unlocked() const;
     bool tp_segmentation_enabled(service_t _service, instance_t _instance, method_t _method) const override;
 
-    void on_unicast_received(const boost::system::error_code& _error, std::size_t _bytes, const message_buffer_t& _unicast_recv_buffer);
+    void on_unicast_received(const boost::system::error_code& _error, std::size_t _bytes,
+                             const message_buffer_ptr_t& _unicast_recv_buffer);
 
     void on_multicast_received(const boost::system::error_code& _error, std::size_t _bytes, const boost::asio::ip::udp::endpoint& _sender,
-                               const boost::asio::ip::address& _destination, const message_buffer_t& _multicast_recv_buffer);
+                               const boost::asio::ip::address& _destination, const message_buffer_ptr_t& _multicast_recv_buffer);
 
     void on_message_received_unlocked(const boost::system::error_code& _error, std::size_t _bytes, bool _is_multicast,
-                                      const endpoint_type& _remote, const message_buffer_t& _buffer);
+                                      const endpoint_type& _remote, const message_buffer_ptr_t& _buffer);
 
     bool is_same_subnet_unlocked(const boost::asio::ip::address& _address) const;
 

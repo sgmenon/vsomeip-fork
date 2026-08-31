@@ -61,25 +61,28 @@ Three columns only — do not mix stages across eras in one row:
 
 | Path | Before scatter / pin work | Now (required slice) | Target |
 | ---- | ------------------------- | -------------------- | ------ |
-| Network → hosting app (no E2E) | several (strip + deserialize + …) | **1×** (`copy_of` at `routing_host` → RM) | **0×** (UDP pin / TCP exact-frame) |
-| Network → hosting app (with E2E) | several more (materialize strip, …) | **1×** edge; then views | **0×** (+ shared filter) |
-| Network → other local (E2E strip forward) | full concat / materialize | **1×** edge; then **16B** hdr + app slice | **0×** edge; same **16B** + slice |
+| UDP → hosting app (no E2E) | several (strip + deserialize + …) | **0×** (datagram pin via `slice`/`whole`) | **0×** |
+| TCP/UDS → hosting app (no E2E) | several | **1×** (`copy_of` at byte* edge) | **0×** (exact-frame) |
+| Network → hosting app (with E2E) | several more (materialize strip, …) | UDP **0×** / TCP **1×** edge; then views | **0×** (+ shared filter) |
+| Network → other local (E2E strip forward) | full concat / materialize | same edge as above; then **16B** hdr + app slice | **0×** edge; same **16B** + slice |
 | Stub IPC → RM | often already owned / varied | **0×** (`slice` of IPC frame) | **0×** |
 | SOME/IP-TP reassemble | **1×** full | **1×** full | **1×** until TP elision |
 | Proxy deserialize | **+2–3×** | **+2–3×** | open |
 
-**Now, network path in one sentence:** endpoints still pass `byte*` into
-`routing_host`; RM does one `copy_of`; after that, deliver / E2E / local forward
-only view or scatter. Stub already skips that edge copy.
+**Now, in one sentence:** UDP pins the datagram `shared_ptr` into
+`routing_host::on_message(owned_buffer_slice)` (server allocates a fresh recv
+buffer each datagram). TCP/UDS still enter via `byte*` + one `copy_of`. After
+the edge owns a slice, deliver / E2E / local forward only view or scatter.
 
 ## Design notes
 
 ### Lifetime
 
 `routing_host::on_message(const byte_t*, …)` pointers stay valid only until the
-next receive reuse. After `copy_of` / `slice`, the `owned_buffer_slice` (and
-any `payload_impl` / `buffer_sequence` built from it) keep the buffer alive
-until handlers / async local writes complete.
+next receive reuse (TCP/UDS today). UDP passes an `owned_buffer_slice` that
+keeps the datagram buffer alive. After `copy_of` / `slice`, any `payload_impl`
+/ `buffer_sequence` built from the frame keep the buffer alive until handlers /
+async local writes complete.
 
 ### Deliver without full-frame deserialize
 
@@ -96,7 +99,8 @@ subscribers get `send_local(sequence)`.
 
 1. Stub SEND: slice of IPC SOME/IP region (done).
 2. RM internal forwards / deliver: consume slice only (done).
-3. UDP: pass datagram `message_buffer_ptr_t` as `whole(recv_buf)` (next).
+3. UDP: pass datagram pin as `whole` / used-bytes `slice` (done; server no longer
+   recycles the recv buffer).
 4. TCP/UDS: exact-frame alloc after 16B length parse, or one copy out of the
    stream window (avoids compaction invalidation) — open until then.
 
@@ -112,15 +116,16 @@ Scatter send already works; receive elision is separate.
 - [x] Required `owned_buffer_slice` at service-level routing ingress
 - [x] Unified slice type for receive and `buffer_sequence` segments
 - [x] Stub SEND: `slice` of IPC frame (**0×** on that path)
-- [x] Network interim: `routing_host(byte*)` → `copy_of` into RM (**1×** until endpoints pin)
+- [x] Network interim: `routing_host(byte*)` → `copy_of` into RM (**1×** for TCP/UDS; UDP pins)
 - [x] Host deliver / notify / E2E strip: views + scatter only (no extra payload copies after the edge owns a slice)
 - [x] `payload_impl` view-only; unit tests for payload pin + e2e protect
 
 ### Remaining — toward network **0×** target
 
-- [ ] **UDP:** pass datagram recv `shared_ptr` as `whole` / used-bytes `slice` (drops the edge `copy_of`)
+- [x] **UDP:** pass datagram recv `shared_ptr` as `whole` / used-bytes `slice` (drops the edge `copy_of`)
+- [x] `routing_host::on_message(owned_buffer_slice, …)` overload (byte* kept for TCP/UDS; default forwards)
 - [ ] **TCP/UDS:** exact-frame alloc after 16B length parse (preferred), or copy one message out of the stream window — do **not** pin into a buffer that compaction can move
-- [ ] Prefer `on_message(owned_buffer_slice, endpoint*, …)` at `routing_host`; retire byte\* + `copy_of` once endpoints are plumbed
+- [ ] Retire byte* + `copy_of` once TCP/UDS/local endpoints are plumbed
 - [ ] Network / integration coverage for E2E check + strip-by-span with a real pin
 
 ### Later / separate tracks

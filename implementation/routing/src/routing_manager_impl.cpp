@@ -1819,15 +1819,24 @@ bool routing_manager_impl::stop_offer_service_remotely(service_t _service, insta
 void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
                                       const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address,
                                       std::uint16_t _remote_port) {
+    // TCP/UDS/local still enter via byte*; copy once at the edge.
+    on_message(owned_buffer_slice::copy_of(_data, _size), _receiver, _is_multicast, _bound_client, _sec_client, _remote_address,
+               _remote_port);
+}
+
+void routing_manager_impl::on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast, client_t _bound_client,
+                                      const vsomeip_sec_client_t* _sec_client, const boost::asio::ip::address& _remote_address,
+                                      std::uint16_t _remote_port) {
     (void)_bound_client;
+    if (!_frame.valid() || _frame.length < VSOMEIP_FULL_HEADER_SIZE) {
+        VSOMEIP_ERROR << "Dropped message with invalid size " << (_frame.valid() ? _frame.length : 0);
+        return;
+    }
+    const byte_t* _data = _frame.data();
+    const length_t _size = static_cast<length_t>(_frame.length);
     uint8_t its_check_status = e2e::profile_interface::generic_check_status::E2E_OK;
     instance_t its_instance(0x0);
     bool is_forwarded(true);
-    // message is at least 16-bytes, see also PRS_SOMEIP_00910
-    if (_size < VSOMEIP_FULL_HEADER_SIZE) {
-        VSOMEIP_ERROR << "Dropped message with invalid size " << _size;
-        return;
-    }
 
     const message_type_e its_message_type = static_cast<message_type_e>(_data[VSOMEIP_MESSAGE_TYPE_POS]);
     const service_t its_service = bithelper::read_uint16_be(&_data[VSOMEIP_SERVICE_POS_MIN]);
@@ -1949,12 +1958,11 @@ void routing_manager_impl::on_message(const byte_t* _data, length_t _size, endpo
 
         // Common way of message handling
 #ifndef ANDROID
-        is_forwarded = on_message_checked(its_service, its_instance, owned_buffer_slice::copy_of(_data, _size), _receiver->is_reliable(),
-                                          _bound_client, _sec_client, its_check_status, true,
-                                          its_e2e_checked_valid ? &its_e2e_checked : nullptr);
+        is_forwarded = on_message_checked(its_service, its_instance, std::move(_frame), _receiver->is_reliable(), _bound_client,
+                                          _sec_client, its_check_status, true, its_e2e_checked_valid ? &its_e2e_checked : nullptr);
 #else
-        is_forwarded = on_message(its_service, its_instance, owned_buffer_slice::copy_of(_data, _size), _receiver->is_reliable(),
-                                  _bound_client, _sec_client, its_check_status, true);
+        is_forwarded = on_message(its_service, its_instance, std::move(_frame), _receiver->is_reliable(), _bound_client, _sec_client,
+                                  its_check_status, true);
 #endif
     }
 

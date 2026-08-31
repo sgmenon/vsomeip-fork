@@ -104,20 +104,22 @@ struct owned_buffer_slice {
 
     bool is_whole() const { return buffer && offset == 0 && length == buffer->size(); }
 
-    static owned_buffer_slice whole(message_buffer_ptr_t _buffer) {
+    // Copies the shared_ptr so callers can pin multiple slices of one datagram.
+    static owned_buffer_slice whole(const message_buffer_ptr_t& _buffer) {
         owned_buffer_slice its_slice;
         if (_buffer) {
-            its_slice.buffer = std::move(_buffer);
+            its_slice.buffer = _buffer;
             its_slice.offset = 0;
-            its_slice.length = its_slice.buffer->size();
+            its_slice.length = _buffer->size();
         }
         return its_slice;
     }
 
-    static owned_buffer_slice slice(message_buffer_ptr_t _buffer, std::size_t _offset, std::size_t _length) {
+    // Copies the shared_ptr (safe for multi-message datagrams).
+    static owned_buffer_slice slice(const message_buffer_ptr_t& _buffer, std::size_t _offset, std::size_t _length) {
         owned_buffer_slice its_slice;
         if (_buffer && _offset + _length <= _buffer->size()) {
-            its_slice.buffer = std::move(_buffer);
+            its_slice.buffer = _buffer;
             its_slice.offset = _offset;
             its_slice.length = _length;
         }
@@ -133,12 +135,12 @@ struct owned_buffer_slice {
     }
 
     // Prefer a pin covering [_data, _data+_size); otherwise copy_of.
-    static owned_buffer_slice from_pointer(const byte_t* _data, std::size_t _size, message_buffer_ptr_t _pin) {
+    static owned_buffer_slice from_pointer(const byte_t* _data, std::size_t _size, const message_buffer_ptr_t& _pin) {
         if (!_data || _size == 0) {
             return owned_buffer_slice{};
         }
         if (_pin && _data >= _pin->data() && (_data + _size) <= (_pin->data() + _pin->size())) {
-            return slice(std::move(_pin), static_cast<std::size_t>(_data - _pin->data()), _size);
+            return slice(_pin, static_cast<std::size_t>(_data - _pin->data()), _size);
         }
         return copy_of(_data, _size);
     }

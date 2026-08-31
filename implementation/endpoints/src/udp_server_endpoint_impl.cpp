@@ -287,11 +287,12 @@ void udp_server_endpoint_impl::receive_unicast_unlocked(std::shared_ptr<message_
 
                     if (lifecycle_idx == self->lifecycle_idx_.load() && _error != boost::asio::error::eof
                         && _error != boost::asio::error::connection_reset && _error != boost::asio::error::operation_aborted) {
-                        self->on_unicast_received(_error, _bytes, *_unicast_recv_buffer);
+                        self->on_unicast_received(_error, _bytes, _unicast_recv_buffer);
 
                         std::scoped_lock its_lock(self->sync_);
                         if (lifecycle_idx == self->lifecycle_idx_.load()) {
-                            self->receive_unicast_unlocked(_unicast_recv_buffer);
+                            // Fresh buffer next recv so pinned slices stay valid.
+                            self->receive_unicast_unlocked(nullptr);
                             repeat = true;
                         }
                     }
@@ -336,7 +337,8 @@ void udp_server_endpoint_impl::receive_multicast_unlocked(std::shared_ptr<messag
 
                         std::scoped_lock its_lock(self->sync_);
                         if (lifecycle_idx == self->lifecycle_idx_.load()) {
-                            self->receive_multicast_unlocked(its_storage->multicast_recv_buffer_);
+                            // Fresh buffer next recv so pinned slices stay valid.
+                            self->receive_multicast_unlocked(nullptr);
                             repeat = true;
                         }
                     }
@@ -564,7 +566,7 @@ uint16_t udp_server_endpoint_impl::get_local_port() const {
 }
 
 void udp_server_endpoint_impl::on_unicast_received(const boost::system::error_code& _error, std::size_t _bytes,
-                                                   const message_buffer_t& _unicast_recv_buffer) {
+                                                   const message_buffer_ptr_t& _unicast_recv_buffer) {
     // The caller shall not hold the lock
 
     if (_error) {
@@ -577,7 +579,7 @@ void udp_server_endpoint_impl::on_unicast_received(const boost::system::error_co
 void udp_server_endpoint_impl::on_multicast_received(const boost::system::error_code& _error, std::size_t _bytes,
                                                      const boost::asio::ip::udp::endpoint& _sender,
                                                      const boost::asio::ip::address& _destination,
-                                                     const message_buffer_t& _multicast_recv_buffer) {
+                                                     const message_buffer_ptr_t& _multicast_recv_buffer) {
     // The caller shall not hold the lock
 
     if (_error) {
@@ -603,7 +605,7 @@ void udp_server_endpoint_impl::on_multicast_received(const boost::system::error_
                 on_message_received_unlocked(_error, _bytes, true, _sender, _multicast_recv_buffer);
             }
         } else if (own_callback) {
-            own_callback(_multicast_recv_buffer.data(), static_cast<uint32_t>(_bytes), boost::asio::ip::address());
+            own_callback(_multicast_recv_buffer->data(), static_cast<uint32_t>(_bytes), boost::asio::ip::address());
         } else {
             // Nothing to do, else clang-tidy complains
         }
@@ -611,8 +613,12 @@ void udp_server_endpoint_impl::on_multicast_received(const boost::system::error_
 }
 
 void udp_server_endpoint_impl::on_message_received_unlocked(const boost::system::error_code& _error, std::size_t _bytes, bool _is_multicast,
-                                                            const endpoint_type& _remote, const message_buffer_t& _buffer) {
+                                                            const endpoint_type& _remote, const message_buffer_ptr_t& _recv_buffer) {
     // The caller shall not hold the lock
+    if (!_recv_buffer) {
+        return;
+    }
+    const message_buffer_t& _buffer = *_recv_buffer;
 
 #if 0
     std::stringstream msg;
@@ -655,8 +661,8 @@ void udp_server_endpoint_impl::on_message_received_unlocked(const boost::system:
                                           << " local: " << get_address_port_local_unlocked() << " remote: " << its_remote_address << ":"
                                           << std::dec << its_remote_port;
                             // ensure to send back a message w/ wrong protocol version
-                            its_host->on_message(&_buffer[i], VSOMEIP_SOMEIP_HEADER_SIZE + 8, this, _is_multicast, VSOMEIP_ROUTING_CLIENT,
-                                                 nullptr, its_remote_address, its_remote_port);
+                            its_host->on_message(owned_buffer_slice::slice(_recv_buffer, i, VSOMEIP_SOMEIP_HEADER_SIZE + 8), this,
+                                                 _is_multicast, VSOMEIP_ROUTING_CLIENT, nullptr, its_remote_address, its_remote_port);
                         } else if (!utility::is_valid_message_type(tp::tp::tp_flag_unset(_buffer[i + VSOMEIP_MESSAGE_TYPE_POS]))) {
                             VSOMEIP_ERROR << instance_name_ << __func__ << ": invalid message type: 0x" << std::hex << std::setfill('0')
                                           << std::setw(2) << static_cast<uint32_t>(_buffer[i + VSOMEIP_MESSAGE_TYPE_POS])
@@ -712,14 +718,15 @@ void udp_server_endpoint_impl::on_message_received_unlocked(const boost::system:
                                     clients_to_target_[to_clients_key(its_service, its_method, its_client)] = _remote;
                                 }
                             }
-                            its_host->on_message(&res.second[0], static_cast<uint32_t>(res.second.size()), this, _is_multicast,
-                                                 VSOMEIP_ROUTING_CLIENT, nullptr, its_remote_address, its_remote_port);
+                            its_host->on_message(
+                                    owned_buffer_slice::whole(std::make_shared<message_buffer_t>(std::move(res.second))), this,
+                                    _is_multicast, VSOMEIP_ROUTING_CLIENT, nullptr, its_remote_address, its_remote_port);
                         }
                     } else {
                         if (its_service != VSOMEIP_SD_SERVICE
                             || (current_message_size > VSOMEIP_SOMEIP_HEADER_SIZE && current_message_size >= remaining_bytes)) {
-                            its_host->on_message(&_buffer[i], current_message_size, this, _is_multicast, VSOMEIP_ROUTING_CLIENT, nullptr,
-                                                 its_remote_address, its_remote_port);
+                            its_host->on_message(owned_buffer_slice::slice(_recv_buffer, i, current_message_size), this, _is_multicast,
+                                                 VSOMEIP_ROUTING_CLIENT, nullptr, its_remote_address, its_remote_port);
                         } else {
                             // ignore messages for service discovery with shorter SomeIP length
                             VSOMEIP_ERROR << instance_name_ << __func__ << ": unreliable vSomeIP SD message with too short length field"

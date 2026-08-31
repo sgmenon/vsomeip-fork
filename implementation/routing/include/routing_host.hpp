@@ -13,6 +13,8 @@
 #include <vsomeip/primitive_types.hpp>
 #include <vsomeip/vsomeip_sec.h>
 
+#include "../../endpoints/include/buffer.hpp"
+
 #ifdef ANDROID
 #include "../../configuration/include/internal_android.hpp"
 #else
@@ -31,6 +33,20 @@ public:
                             client_t _bound_client = VSOMEIP_ROUTING_CLIENT, const vsomeip_sec_client_t* _sec_client = nullptr,
                             const boost::asio::ip::address& _remote_address = boost::asio::ip::address(),
                             std::uint16_t _remote_port = 0) = 0;
+
+    // Preferred ingress when the caller already owns a pin (UDP datagram, exact
+    // TCP frame). Default forwards via the byte* overload so stub/client/mocks
+    // keep working until they migrate.
+    virtual void on_message(owned_buffer_slice _frame, endpoint* _receiver, bool _is_multicast = false,
+                            client_t _bound_client = VSOMEIP_ROUTING_CLIENT, const vsomeip_sec_client_t* _sec_client = nullptr,
+                            const boost::asio::ip::address& _remote_address = boost::asio::ip::address(),
+                            std::uint16_t _remote_port = 0) {
+        if (!_frame.valid() || _frame.empty()) {
+            return;
+        }
+        on_message(_frame.data(), static_cast<length_t>(_frame.length), _receiver, _is_multicast, _bound_client, _sec_client,
+                   _remote_address, _remote_port);
+    }
 
     virtual client_t get_client() const = 0;
     virtual void add_known_client(client_t _client, const std::string& _client_host) = 0;

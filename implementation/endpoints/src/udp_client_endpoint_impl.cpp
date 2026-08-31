@@ -305,8 +305,8 @@ void udp_client_endpoint_impl::receive_cbk(boost::system::error_code const& _err
                                       << std::uint32_t((*_recv_buffer)[i + VSOMEIP_PROTOCOL_VERSION_POS])
                                       << " local: " << get_address_port_local() << " remote: " << get_address_port_remote();
                         // ensure to send back a message w/ wrong protocol version
-                        its_host->on_message(&(*_recv_buffer)[i], VSOMEIP_SOMEIP_HEADER_SIZE + 8, this, false, VSOMEIP_ROUTING_CLIENT,
-                                             nullptr, remote_address_, remote_port_);
+                        its_host->on_message(owned_buffer_slice::slice(_recv_buffer, i, VSOMEIP_SOMEIP_HEADER_SIZE + 8), this, false,
+                                             VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                     } else if (!utility::is_valid_message_type(tp::tp::tp_flag_unset((*_recv_buffer)[i + VSOMEIP_MESSAGE_TYPE_POS]))) {
                         VSOMEIP_ERROR << "uce: Invalid message type: 0x" << std::hex << std::setfill('0') << std::setw(2)
                                       << std::uint32_t((*_recv_buffer)[i + VSOMEIP_MESSAGE_TYPE_POS])
@@ -322,12 +322,13 @@ void udp_client_endpoint_impl::receive_cbk(boost::system::error_code const& _err
                     const auto res =
                             tp_reassembler_->process_tp_message(&(*_recv_buffer)[i], current_message_size, remote_address_, remote_port_);
                     if (res.first) {
-                        its_host->on_message(&res.second[0], static_cast<std::uint32_t>(res.second.size()), this, false,
-                                             VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
+                        its_host->on_message(
+                                owned_buffer_slice::whole(std::make_shared<message_buffer_t>(std::move(res.second))), this, false,
+                                VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                     }
                 } else {
-                    its_host->on_message(&(*_recv_buffer)[i], current_message_size, this, false, VSOMEIP_ROUTING_CLIENT, nullptr,
-                                         remote_address_, remote_port_);
+                    its_host->on_message(owned_buffer_slice::slice(_recv_buffer, i, current_message_size), this, false,
+                                         VSOMEIP_ROUTING_CLIENT, nullptr, remote_address_, remote_port_);
                 }
                 remaining_bytes -= current_message_size;
             } else {
