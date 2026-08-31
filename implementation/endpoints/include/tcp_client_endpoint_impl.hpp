@@ -13,6 +13,7 @@
 
 #include <vsomeip/defines.hpp>
 #include "client_endpoint_impl.hpp"
+#include "message_buffer_pool.hpp"
 #if defined(__QNX__)
 #include "../../utility/include/qnx_helper.hpp"
 #endif
@@ -74,6 +75,7 @@ private:
     std::chrono::steady_clock::time_point last_cookie_sent_;
 
     const std::uint32_t recv_buffer_size_initial_;
+    std::shared_ptr<message_buffer_pool> recv_buffer_pool_;
     message_buffer_ptr_t recv_buffer_;
     std::uint32_t shrink_count_;
     const std::uint32_t buffer_shrink_threshold_;

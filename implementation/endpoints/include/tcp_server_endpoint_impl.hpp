@@ -14,6 +14,7 @@
 #include <vsomeip/defines.hpp>
 #include <vsomeip/export.hpp>
 #include "server_endpoint_impl.hpp"
+#include "message_buffer_pool.hpp"
 
 #include <chrono>
 
@@ -70,8 +71,8 @@ private:
         typedef std::shared_ptr<connection> ptr;
 
         static ptr create(const std::weak_ptr<tcp_server_endpoint_impl>& _server, std::uint32_t _max_message_size,
-                          std::uint32_t _buffer_shrink_threshold, bool _use_magic_cookies, boost::asio::io_context& _io,
-                          std::chrono::milliseconds _send_timeout);
+                          std::uint32_t _buffer_shrink_threshold, std::uint32_t _tcp_receive_buffer_pool_size, bool _use_magic_cookies,
+                          boost::asio::io_context& _io, std::chrono::milliseconds _send_timeout);
 
         ~connection();
 
@@ -90,8 +91,9 @@ private:
 
     private:
         connection(const std::weak_ptr<tcp_server_endpoint_impl>& _server, std::uint32_t _max_message_size,
-                   std::uint32_t _recv_buffer_size_initial, std::uint32_t _buffer_shrink_threshold, bool _use_magic_cookies,
-                   boost::asio::io_context& _io, std::chrono::milliseconds _send_timeout);
+                   std::uint32_t _recv_buffer_size_initial, std::uint32_t _buffer_shrink_threshold,
+                   std::uint32_t _tcp_receive_buffer_pool_size, bool _use_magic_cookies, boost::asio::io_context& _io,
+                   std::chrono::milliseconds _send_timeout);
         bool send_magic_cookie(buffer_sequence_ptr_t& _sequence);
         bool is_magic_cookie(size_t _offset) const;
         void receive_cbk(boost::system::error_code const& _error, std::size_t _bytes);
@@ -111,6 +113,7 @@ private:
         const uint32_t max_message_size_;
         const uint32_t recv_buffer_size_initial_;
 
+        std::shared_ptr<message_buffer_pool> recv_buffer_pool_;
         message_buffer_t recv_buffer_;
         size_t recv_buffer_size_;
         std::uint32_t missing_capacity_;
@@ -138,6 +141,7 @@ private:
     typedef std::map<endpoint_type, connection::ptr> connections_t;
     connections_t connections_;
     const std::uint32_t buffer_shrink_threshold_;
+    const std::uint32_t tcp_receive_buffer_pool_size_;
     const std::chrono::milliseconds send_timeout_;
 
     std::string instance_name_;
