@@ -30,19 +30,24 @@ Item (3) matters: if you only invent a nicer protect API and then
 the paperwork and kept the copy tax. The queue type and the socket type
 had to change together.
 
-Receive is intentionally boring. Datagrams and TCP streams already
-reassemble to contiguous memory; `check()` and strip stay on that path.
+Receive is intentionally still contiguous at the socket: UDP datagrams and
+TCP/UDS stream windows already yield one byte range per message. What changed
+is **ownership after that**: routing ingress takes an `owned_buffer_slice`
+(pin or one copy-out), `check()` returns spans into that buffer, and strip /
+deliver / proxy SEND build `payload_impl` views or a 16B header + app slice —
+no full-frame re-materialize. Details:
+[`receive-copy-elision.md`](receive-copy-elision.md).
 
 ## 2. What changed
 
-| Layer                  | Before                                      | After                                                |
-| ---------------------- | ------------------------------------------- | ---------------------------------------------------- |
-| App payload            | Often pre-sized with E2E holes              | Hole-free user data                                  |
-| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect` → `protect_result`                  |
-| E2E check / strip      | `check` + `get_unprotected_payload`         | `check` → `check_result` (spans into receive buffer) |
-| Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `buffer_sequence`, always `send(sequence)`   |
-| Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `buffer_sequence`                             |
-| TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                 |
+| Layer                  | Before                                      | After                                                                                                 |
+| ---------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| App payload            | Often pre-sized with E2E holes              | Hole-free user data                                                                                   |
+| E2E plugin             | In-place `protect(e2e_buffer&)`             | Public `protect` → `protect_result`                                                                   |
+| E2E check / strip      | `check` + `get_unprotected_payload`         | `check` → `check_result` spans; strip via views / `compose_e2e_stripped_sequence` (16B hdr + app pin) |
+| Routing send           | Protect, maybe flatten, `send(byte*, size)` | Compose `buffer_sequence`, always `send(sequence)`                                                    |
+| Endpoint queue / train | One contiguous `message_buffer_ptr_t`       | Owning `buffer_sequence`                                                                              |
+| TCP / UDP sockets      | Single `const_buffer`                       | `vector<const_buffer>` (`buffers()`)                                                                  |
 
 JSON E2E configuration is unchanged. Profiles, offsets, and
 `e2e_enabled` keep working the same way — only the _application payload
@@ -61,6 +66,9 @@ peer will not.
 
 Receive delivery to the application is hole-free again after a successful
 check + strip. Application handlers should not see the E2E header bytes.
+The public `application` / `message` / `payload` APIs are unchanged: handlers
+still get `shared_ptr<message>`; the payload may be a view into a pinned
+receive buffer rather than a freshly allocated vector.
 
 External E2E plugins should implement the same `protect` / `check` contract when they move onto this path. Stock `libvsomeip3-e2e` **refuses** standard AUTOSAR profiles for SOME/IP-SD (`service_id`, `0xFFFF`): routing may still call protect/check on `send_via_sd` /
 SD `on_message`, but only a dedicated plugin should register that ID.
@@ -155,6 +163,8 @@ blob (SOME/IP-TP split, tracing). It is not the send path.
 
 ## 6. Data path
 
+**Send**
+
 ```
 App (hole-free payload)
   → serialize SOME/IP
@@ -164,13 +174,32 @@ App (hole-free payload)
   → async_write / async_send (buffers())
 ```
 
-On receive there is no scatter-gather. The datagram is already contiguous.
-`check()` verifies CRC/counter in place and returns spans for the three
-sections. `strip_e2e_protected_payload` rebuilds
-`[bytes before e2e_header] + app_payload` (footer is dropped) and rewrites
-the SOME/IP length. Stock AUTOSAR footers are empty. P01 protect packs
-CRC/counter/nibble into `app_payload`; check still exposes those leading
-fields as `e2e_header` so the same strip path works.
+**Receive** (see [`receive-copy-elision.md`](receive-copy-elision.md))
+
+```
+Endpoint recv
+  → owned_buffer_slice (UDP: pin datagram; TCP/UDS: copy-out complete frame/command)
+  → routing_host::on_message(slice)
+  → e2e check → check_result spans into the pin
+  → host deliver: payload_impl view of app_payload
+    or local forward: compose_e2e_stripped_sequence (owned 16B hdr + app slice)
+  → proxy app (if any): SEND header-only parse + build_message_from_buffer pin
+```
+
+There is still no scatter-gather **read** from the socket. Contiguous bytes
+arrive; zero-copy is about not copying them again. `check()` verifies
+CRC/counter in place and returns spans for the three sections. Strip no
+longer concatenates a hole-free blob for the common path: routing keeps the
+SOME/IP header (length patched into a small owned 16B buffer when
+forwarding) and pins `app_payload` when it lies in the frame buffer.
+Stock AUTOSAR footers are empty. P01 protect packs CRC/counter/nibble into
+`app_payload`; check still exposes those leading fields as `e2e_header` so
+the same strip path works.
+
+SOME/IP-SD keeps its own `on_message(const byte_t*, …)` API; RM extracts
+bytes from the frame pin when calling into SD. Changing SD to
+`owned_buffer_slice` is deferred until SD itself needs lifetime beyond the
+call.
 
 ## 7. Compatibility notes
 
@@ -205,4 +234,6 @@ See also [`test/network_tests/docker_tests/README.md`](../test/network_tests/doc
 
 ## 9. Follow-ups
 
-Optional follow-ups: train-batching stress without E2E, SecOC plugins on the same contract, TP without `flatten()`.
+Optional follow-ups: train-batching stress without E2E, SecOC plugins on the same
+contract, TP without `flatten()`, SD `on_message` on `owned_buffer_slice` if SD
+needs pin lifetime beyond the call.

@@ -52,14 +52,14 @@ void send_command::set_target(client_t _target) {
     target_ = _target;
 }
 
-std::vector<byte_t> send_command::get_message() const {
+const std::vector<byte_t>& send_command::get_message() const {
 
     return message_;
 }
 
 void send_command::set_message(const std::vector<byte_t>& _message) {
 
-    message_ = std::move(_message);
+    message_ = _message;
 }
 
 void send_command::serialize(std::vector<byte_t>& _buffer, error_e& _error) const {
@@ -96,7 +96,7 @@ void send_command::serialize(std::vector<byte_t>& _buffer, error_e& _error) cons
     std::memcpy(&_buffer[its_offset], &message_[0], message_.size());
 }
 
-void send_command::deserialize(const std::vector<byte_t>& _buffer, error_e& _error) {
+void send_command::deserialize_header(const std::vector<byte_t>& _buffer, error_e& _error) {
 
     size_t its_size(COMMAND_HEADER_SIZE + sizeof(instance_) + sizeof(is_reliable_) + sizeof(status_) + sizeof(target_));
 
@@ -111,7 +111,7 @@ void send_command::deserialize(const std::vector<byte_t>& _buffer, error_e& _err
     if (_error != error_e::ERROR_OK)
         return;
 
-    // deserialize payload
+    // deserialize fixed SEND fields (no SOME/IP body copy)
     size_t its_offset(COMMAND_POSITION_PAYLOAD);
     std::memcpy(&instance_, &_buffer[its_offset], sizeof(instance_));
     its_offset += sizeof(instance_);
@@ -120,10 +120,17 @@ void send_command::deserialize(const std::vector<byte_t>& _buffer, error_e& _err
     status_ = static_cast<uint8_t>(_buffer[its_offset]);
     its_offset += sizeof(status_);
     std::memcpy(&target_, &_buffer[its_offset], sizeof(target_));
-    its_offset += sizeof(target_);
-    message_.resize(_buffer.size() - its_offset);
-    std::memcpy(&message_[0], &_buffer[its_offset], message_.size());
+}
+
+void send_command::deserialize(const std::vector<byte_t>& _buffer, error_e& _error) {
+
+    deserialize_header(_buffer, _error);
+    if (_error != error_e::ERROR_OK)
+        return;
+
+    size_t its_offset(SEND_COMMAND_HEADER_SIZE);
+    message_.assign(_buffer.begin() + static_cast<std::ptrdiff_t>(its_offset), _buffer.end());
 }
 
 } // namespace protocol
-} // namespace vsomeip
+} // namespace vsomeip_v3

@@ -29,6 +29,7 @@
 #include "../include/routing_manager_host.hpp"
 #include "../include/routing_manager_client.hpp"
 #include "../include/payload_ownership.hpp"
+#include "../include/e2e_receive_helpers.hpp"
 #include "../../configuration/include/configuration.hpp"
 #include "../../endpoints/include/server_endpoint.hpp"
 #include "../../endpoints/include/abstract_socket_factory.hpp"
@@ -996,12 +997,13 @@ void routing_manager_client::on_message(owned_buffer_slice _frame, endpoint* _re
 #ifndef VSOMEIP_DISABLE_SECURITY
     bool is_internal_policy_update(false);
 #endif // !VSOMEIP_DISABLE_SECURITY
-    std::vector<byte_t> its_buffer;
+    message_buffer_ptr_t its_owned;
     if (_frame.is_whole() && _frame.buffer.use_count() == 1) {
-        its_buffer = std::move(*_frame.buffer);
+        its_owned = std::move(_frame.buffer);
     } else {
-        its_buffer.assign(_frame.data(), _frame.data() + _frame.length);
+        its_owned = std::make_shared<message_buffer_t>(_frame.data(), _frame.data() + _frame.length);
     }
+    std::vector<byte_t>& its_buffer = *its_owned;
     protocol::error_e its_error;
 
     auto its_policy_manager = configuration_->get_policy_manager();
@@ -1040,14 +1042,24 @@ void routing_manager_client::on_message(owned_buffer_slice _frame, endpoint* _re
         switch (its_id) {
         case protocol::id_e::SEND_ID: {
             protocol::send_command its_send_command(protocol::id_e::SEND_ID);
-            its_send_command.deserialize(its_buffer, its_error);
+            its_send_command.deserialize_header(its_buffer, its_error);
             if (its_error == protocol::error_e::ERROR_OK) {
+                if (its_owned->size() <= protocol::SEND_COMMAND_HEADER_SIZE + VSOMEIP_MESSAGE_TYPE_POS) {
+                    VSOMEIP_ERROR << "Routing proxy: on_message: SEND command too short";
+                    break;
+                }
+                const std::size_t its_someip_offset = protocol::SEND_COMMAND_HEADER_SIZE;
+                const length_t its_message_size = static_cast<length_t>(its_owned->size() - its_someip_offset);
+                const byte_t* its_message_data = its_owned->data() + its_someip_offset;
+                const uint32_t its_contained_size = bithelper::read_uint32_be(&its_message_data[VSOMEIP_LENGTH_POS_MIN]);
+                if (its_message_size != its_contained_size + VSOMEIP_SOMEIP_HEADER_SIZE) {
+                    VSOMEIP_WARNING << "Routing proxy: on_message: SEND command containing message "
+                                       "with invalid size -> skip!";
+                    break;
+                }
 
-                auto a_deserializer = get_deserializer();
-                a_deserializer->set_data(its_send_command.get_message());
-                std::shared_ptr<message_impl> its_message(a_deserializer->deserialize_message());
-                a_deserializer->reset();
-                put_deserializer(a_deserializer);
+                auto its_message = build_message_from_buffer(
+                        owned_buffer_slice::slice(its_owned, its_someip_offset, its_message_size));
 
                 if (its_message) {
                     its_message->set_instance(its_send_command.get_instance());
@@ -1184,14 +1196,7 @@ void routing_manager_client::on_message(owned_buffer_slice _frame, endpoint* _re
                                         std::make_tuple(its_message->get_service(), its_message->get_instance()))))) {
                         trace::header its_header;
                         if (its_header.prepare(nullptr, false, its_send_command.get_instance())) {
-                            uint32_t its_message_size = its_send_command.get_size();
-                            if (its_message_size >= uint32_t{vsomeip_v3::protocol::SEND_COMMAND_HEADER_SIZE})
-                                its_message_size -= uint32_t{vsomeip_v3::protocol::SEND_COMMAND_HEADER_SIZE};
-                            else
-                                its_message_size = 0;
-
-                            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, &its_buffer[vsomeip_v3::protocol::SEND_COMMAND_HEADER_SIZE],
-                                       its_message_size);
+                            tc_->trace(its_header.data_, VSOMEIP_TRACE_HEADER_SIZE, its_message_data, its_message_size);
                         }
                     }
 

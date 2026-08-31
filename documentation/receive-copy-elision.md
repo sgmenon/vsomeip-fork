@@ -68,13 +68,13 @@ Three columns only — do not mix stages across eras in one row:
 | Network → other local (E2E strip forward) | full concat / materialize           | same edge as above; then **16B** hdr + app slice                  | **0×** edge; same **16B** + slice      |
 | Stub SEND → RM                            | often already owned / varied        | **0×** (`slice` of IPC frame)                                     | **0×**                                 |
 | SOME/IP-TP reassemble                     | **1×** full                         | **1×** full                                                       | **1×** until TP elision                |
-| Proxy deserialize                         | **+2–3×**                           | **+2–3×**                                                         | open                                   |
+| Proxy receive (RM → app)                  | **+2–3×** after IPC fill            | **1×** edge; then **0×** (`build_message_from_buffer` pin)        | **0×** (optional move of whole window) |
 
 **Now, in one sentence:** All routing ingress uses
 `routing_host::on_message(owned_buffer_slice)`. UDP pins the datagram
 `shared_ptr`. Remote TCP and local stream servers **copy out** each complete
 frame/command (stream windows still compact). After the edge owns a slice,
-deliver / E2E / local forward only view or scatter.
+deliver / E2E / local forward / proxy SEND receive only view or pin.
 
 ## Design notes
 
@@ -106,10 +106,12 @@ subscribers get `send_local(sequence)`.
    (done; stream compaction unchanged). `routing_host` byte\* + RM `copy_of`
    adapter retired.
 
-### Proxy path (open)
+### Proxy path
 
-Non-routing apps still copy on IPC receive + `send_command` + deserialize.
-Scatter send already works; receive elision is separate.
+Non-routing apps (`routing_manager_client`) receive SEND over local IPC, parse
+the command header in place, and pin the SOME/IP region with
+`build_message_from_buffer` (**0×** after the stream edge copy-out). Notifications
+to the proxy arrive as `SEND_ID` with notification message type on the same path.
 
 ## Implementation checklist
 
@@ -130,15 +132,14 @@ Scatter send already works; receive elision is separate.
 - [x] **Integration:** E2E check + strip-by-span with a real `owned_buffer_slice` pin
       (`ut_check_strip_pin` — spans / `payload_impl` / stripped sequence share the frame buffer;
       docker `e2e_*` remains wire CRC smoke only)
+- [x] Public `application` / `message` / `payload` APIs unchanged (handlers still get `shared_ptr<message>`; payload may view a pin)
+- [x] Proxy / routing-client SEND receive: header-only parse + `payload_impl` pin (notifications via same `SEND_ID`)
 
 ### Later / separate tracks
 
-- [ ] Proxy / routing-client deserialize elision
 - [ ] SOME/IP-TP reassembly without full flatten
-- [ ] Sync receive notes in [`e2e-scatter-gather-send.md`](e2e-scatter-gather-send.md)
-- [ ] SD `on_message` (stays `byte*` until SD needs it)
-- [ ] Public `application` / `message` APIs unchanged by design
 - [ ] Optional TCP/UDS micro-opt: move whole stream buffer when `gap == 0` and size == full buffer
+- [ ] SD `on_message` → `owned_buffer_slice` (deferred; still `byte*` — RM passes pin bytes into SD today)
 
 ## Related docs
 

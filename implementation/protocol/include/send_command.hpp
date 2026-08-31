@@ -17,6 +17,9 @@ public:
 
     void serialize(std::vector<byte_t>& _buffer, error_e& _error) const;
     void deserialize(const std::vector<byte_t>& _buffer, error_e& _error);
+    // Parses id/client/size + instance/reliable/status/target. Does not copy the
+    // SOME/IP body — callers that pin the IPC buffer should use this.
+    void deserialize_header(const std::vector<byte_t>& _buffer, error_e& _error);
 
     instance_t get_instance() const;
     void set_instance(instance_t _instance);
@@ -30,8 +33,7 @@ public:
     client_t get_target() const;
     void set_target(client_t _target);
 
-    // TODO: Optimize this as the vector might be huge!
-    std::vector<byte_t> get_message() const;
+    const std::vector<byte_t>& get_message() const;
     void set_message(const std::vector<byte_t>& _message);
 
 private:

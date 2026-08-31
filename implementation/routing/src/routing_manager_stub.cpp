@@ -442,12 +442,11 @@ void routing_manager_stub::on_message(std::vector<byte_t>&& _buffer, client_t _b
     }
 
     case protocol::id_e::SEND_ID: {
+        // Keep the IPC frame alive and pin SOME/IP header/payload slices for remote send.
+        auto its_frame = std::make_shared<message_buffer_t>(std::move(its_buffer));
         protocol::send_command its_command(its_id);
-        its_command.deserialize(its_buffer, its_error);
+        its_command.deserialize_header(*its_frame, its_error);
         if (its_error == protocol::error_e::ERROR_OK) {
-
-            // Keep the IPC frame alive and pin SOME/IP header/payload slices for remote send.
-            auto its_frame = std::make_shared<message_buffer_t>(std::move(its_buffer));
             if (its_frame->size() <= protocol::SEND_COMMAND_HEADER_SIZE + VSOMEIP_MESSAGE_TYPE_POS) {
                 break;
             }
