@@ -457,7 +457,6 @@ cc_shared_library(
         # exported here — otherwise cc_shared_library flags them as
         # "linked statically by different cc_shared_libraries but not
         # exported".
-        "@boost.asio//:asio_openssl",
         "@boost.asio",
         "@boost.coroutine",
         "@boost.context",
@@ -467,8 +466,11 @@ cc_shared_library(
         "@boost.process",
         "@boost.filesystem",
         "@boost.serialization",
+        "@liburing//:uring",
         "@openssl//:ssl",
         "@openssl//:crypto",
+        "@boringssl//:ssl",
+        "@boringssl//:crypto",
     ],
     deps = [":vsomeip-core-lib"],
 )

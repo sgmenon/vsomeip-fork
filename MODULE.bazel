@@ -5,8 +5,8 @@
 
 module(
     name = "vsomeip",
-    version = "3.6.1.sgm.2",
-    compatibility_level = 1,
+    version = "3.6.1.sgm.3",
+    compatibility_level = 2,
 )
 
 bazel_dep(name = "rules_cc", version = "0.2.14")
@@ -39,7 +39,9 @@ bazel_dep(name = "boost.coroutine", version = "1.87.0")
 bazel_dep(name = "boost.serialization", version = "1.87.0")
 bazel_dep(name = "boost.thread", version = "1.87.0")
 bazel_dep(name = "boost.container", version = "1.87.0")
+bazel_dep(name = "liburing", version = "2.15")
 bazel_dep(name = "openssl", version = "3.3.1.bcr.1")
+bazel_dep(name = "boringssl", version = "0.20251124.0")
 bazel_dep(name = "fmt", version = "11.1.4")
 
 bazel_dep(name = "bazel-toolchains", version = "1.0.0", dev_dependency = True)
