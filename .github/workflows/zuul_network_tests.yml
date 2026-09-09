@@ -44,6 +44,15 @@ jobs:
           docker version
           docker compose version
 
+      - name: Free up disk space
+        run: |
+          sudo apt-get clean
+          sudo apt-get autoclean
+          sudo docker image prune -a --force
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/node_modules
+
       - name: Build and run network tests
         run: |
           set -euo pipefail
