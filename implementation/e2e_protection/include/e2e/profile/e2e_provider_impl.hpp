@@ -38,7 +38,8 @@ public:
     VSOMEIP_EXPORT bool is_protected(e2exf::data_identifier_t id) const override;
     VSOMEIP_EXPORT bool is_checked(e2exf::data_identifier_t id) const override;
 
-    VSOMEIP_EXPORT protect_result protect(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) override;
+    VSOMEIP_EXPORT protect_result protect(e2exf::data_identifier_t id, buffer_view someip_header, buffer_view app_payload,
+                                          instance_t instance) override;
     VSOMEIP_EXPORT check_result check(e2exf::data_identifier_t id, buffer_view _message, instance_t _instance) override;
 
 private:

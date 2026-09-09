@@ -22,8 +22,10 @@ namespace e2e {
 // belong in e2e_footer.
 //
 // app_payload is a non-owning view into the caller's input (same lifetime as
-// protect()'s buffer_view). owned_app_payload is set only when the profile must
-// pack bytes (Profile 01); routing appends that buffer instead of pinning input.
+// protect()'s app_payload buffer_view). owned_app_payload is set only when the
+// profile must pack bytes (Profile 01); routing appends that buffer instead of
+// pinning input. someip_header is passed into protect separately and is not
+// part of these pieces.
 struct protect_result {
     bool valid{false};
     std::shared_ptr<e2e_buffer> e2e_header;

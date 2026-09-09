@@ -109,10 +109,11 @@ bool e2e_provider_impl::is_checked(e2exf::data_identifier_t id) const {
     return custom_checkers_.count(id) > 0;
 }
 
-protect_result e2e_provider_impl::protect(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) {
+protect_result e2e_provider_impl::protect(e2exf::data_identifier_t id, buffer_view someip_header, buffer_view app_payload,
+                                          instance_t instance) {
     auto protector = custom_protectors_.find(id);
     if (protector != custom_protectors_.end()) {
-        return protector->second->protect(app_payload, instance);
+        return protector->second->protect(someip_header, app_payload, instance);
     }
     return protect_result{};
 }

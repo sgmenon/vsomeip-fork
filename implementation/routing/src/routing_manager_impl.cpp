@@ -124,7 +124,8 @@ buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<e2e::
                     ? buffer_view(_app_payload->get_data(), _app_payload->get_length())
                     : buffer_view{};
 
-    e2e::protect_result its_parts = _provider->protect({_service, _method}, its_app_payload, _instance);
+    e2e::protect_result its_parts =
+            _provider->protect({_service, _method}, buffer_view(_someip_header->data(), _someip_header->size()), its_app_payload, _instance);
     if (!its_parts.valid) {
         return nullptr;
     }
@@ -160,7 +161,8 @@ buffer_sequence_ptr_t compose_e2e_protected_sequence(const std::shared_ptr<e2e::
     // Writable SOME/IP header (length updated after protect). Payload stays pinned when possible.
     auto its_header = std::make_shared<message_buffer_t>(_data, _data + its_base);
     const buffer_view its_app_payload(_data + its_base, _size - its_base);
-    e2e::protect_result its_parts = _provider->protect({its_service, its_method}, its_app_payload, _instance);
+    e2e::protect_result its_parts =
+            _provider->protect({its_service, its_method}, buffer_view(its_header->data(), its_header->size()), its_app_payload, _instance);
     if (!its_parts.valid) {
         return nullptr;
     }
