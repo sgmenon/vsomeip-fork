@@ -14,7 +14,8 @@ namespace vsomeip_v3 {
 namespace e2e {
 namespace profile07 {
 
-protect_result protector::protect(buffer_view _app_payload, instance_t _instance) {
+protect_result protector::protect(buffer_view _someip_header, buffer_view _app_payload, instance_t _instance) {
+    (void)_someip_header;
     std::lock_guard<std::mutex> lock(protect_mutex_);
 
     const std::size_t header_size = config_.offset_ + 20;

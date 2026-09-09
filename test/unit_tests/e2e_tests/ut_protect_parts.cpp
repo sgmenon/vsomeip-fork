@@ -123,7 +123,7 @@ TEST(protect_profile04, offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile04::profile_04_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, 12, app);
     expect_check_ok(checker, flatten(parts), 12, app);
@@ -137,7 +137,7 @@ TEST(protect_profile04, nonzero_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile04::profile_04_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, offset + 12, app);
     for (std::size_t i = 0; i < offset; ++i) {
@@ -153,7 +153,7 @@ TEST(protect_profile05, offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile05::profile_05_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, 3, app);
     expect_check_ok(checker, flatten(parts), 3, app);
@@ -167,7 +167,7 @@ TEST(protect_profile05, nonzero_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile05::profile_05_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, offset + 3, app);
     expect_check_ok(checker, flatten(parts), offset + 3, app);
@@ -180,7 +180,7 @@ TEST(protect_profile07, offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile07::profile_07_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, 20, app);
     expect_check_ok(checker, flatten(parts), 20, app);
@@ -194,7 +194,7 @@ TEST(protect_profile07, nonzero_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile07::profile_07_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, offset + 20, app);
     expect_check_ok(checker, flatten(parts), offset + 20, app);
@@ -206,7 +206,7 @@ TEST(protect_profile_custom, crc_offset_zero_scatters_header_and_payload) {
     vsomeip_v3::e2e::profile_custom::profile_custom_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, 4, app);
     expect_check_ok(checker, flatten(parts), 4, app);
@@ -219,7 +219,7 @@ TEST(protect_profile_custom, nonzero_crc_offset_padding_lives_in_header) {
     vsomeip_v3::e2e::profile_custom::profile_custom_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, crc_offset + 4, app);
     expect_check_ok(checker, flatten(parts), crc_offset + 4, app);
@@ -233,7 +233,7 @@ TEST(protect_profile01, packed_data_lives_in_payload) {
     vsomeip_v3::e2e::profile01::profile_01_checker checker(config);
 
     const auto app = make_app_payload(6);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     ASSERT_TRUE(parts.valid);
     EXPECT_TRUE(!parts.e2e_header || parts.e2e_header->empty());
@@ -252,7 +252,7 @@ TEST(protect_profile04, invalid_when_payload_exceeds_max_length) {
     vsomeip_v3::e2e::profile04::protector protector(config);
 
     const auto app = make_app_payload(20);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
     EXPECT_FALSE(parts.valid);
 }
 
@@ -273,7 +273,8 @@ uint32_t read_crc32_be(buffer_view _buf, std::size_t _off) {
 
 class crc_footer_protector : public vsomeip_v3::e2e::profile_interface::protector {
 public:
-    protect_result protect(buffer_view _app_payload, vsomeip_v3::instance_t) override {
+    protect_result protect(buffer_view _someip_header, buffer_view _app_payload, vsomeip_v3::instance_t) override {
+        (void)_someip_header;
         protect_result parts;
         parts.e2e_header = std::make_shared<e2e_buffer>(1, counter_++);
         parts.app_payload = _app_payload;
@@ -304,7 +305,7 @@ TEST(protect_crc_footer, scatters_header_payload_and_footer) {
     crc_footer_checker checker;
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
 
     expect_scatter(parts, 1, app, 4);
     ASSERT_EQ((*parts.e2e_header)[0], 0);
@@ -321,7 +322,7 @@ TEST(protect_crc_footer, check_rejects_tampered_footer) {
     crc_footer_checker checker;
 
     const auto app = make_app_payload(8);
-    auto wire = flatten(protector.protect(buffer_view(app), k_instance));
+    auto wire = flatten(protector.protect(buffer_view{}, buffer_view(app), k_instance));
     ASSERT_FALSE(wire.empty());
     wire.back() ^= 0xFF;
 

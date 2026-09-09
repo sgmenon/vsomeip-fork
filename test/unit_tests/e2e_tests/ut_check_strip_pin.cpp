@@ -95,7 +95,7 @@ TEST(e2e_check_strip_pin, profile04_check_and_strip_pin_recv_frame) {
     vsomeip_v3::e2e::profile04::profile_04_checker checker(config);
 
     const auto app = make_app_payload(8);
-    const auto parts = protector.protect(buffer_view(app), k_instance);
+    const auto parts = protector.protect(buffer_view{}, buffer_view(app), k_instance);
     ASSERT_TRUE(parts.valid);
 
     const auto protected_payload = flatten_protect(parts);

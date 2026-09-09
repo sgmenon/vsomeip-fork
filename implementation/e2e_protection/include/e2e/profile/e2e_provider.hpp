@@ -25,7 +25,12 @@ public:
     virtual bool is_protected(e2exf::data_identifier_t id) const = 0;
     virtual bool is_checked(e2exf::data_identifier_t id) const = 0;
 
-    virtual protect_result protect(e2exf::data_identifier_t id, buffer_view app_payload, instance_t instance) = 0;
+    // `_someip_header` is the 16-byte SOME/IP base header (non-owning). Stock
+    // AUTOSAR profiles ignore it; SecOC-class plugins may include it in the
+    // authentic data. Length may still be provisional — routing patches it
+    // after protect from the returned pieces' size.
+    virtual protect_result protect(e2exf::data_identifier_t id, buffer_view someip_header, buffer_view app_payload,
+                                   instance_t instance) = 0;
 
     // Full SOME/IP message. Returned spans point into `_message`.
     virtual check_result check(e2exf::data_identifier_t id, buffer_view _message, instance_t _instance) = 0;

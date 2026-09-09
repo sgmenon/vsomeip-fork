@@ -13,7 +13,8 @@ namespace vsomeip_v3 {
 namespace e2e {
 namespace profile_custom {
 
-protect_result protector::protect(buffer_view _app_payload, instance_t _instance) {
+protect_result protector::protect(buffer_view _someip_header, buffer_view _app_payload, instance_t _instance) {
+    (void)_someip_header;
     (void)_instance;
 
     std::lock_guard<std::mutex> lock(protect_mutex_);
